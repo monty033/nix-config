@@ -31,7 +31,6 @@
     "d /var/lib/bazarr/config 0755 root root -"
     "d /var/lib/pinchflat 0755 root root -"
     "d /var/lib/dispatcharr 0755 root root -"
-    "d /var/lib/huntarr 0755 root root -"
     "d /var/lib/youtarr 0755 root root -"
     "d /var/lib/youtarr/db 0755 root root -"
     "d /var/lib/youtarr/data 0755 root root -"
@@ -310,24 +309,6 @@
           "/var/lib/pinchflat:/config"
           "/mnt/media/web:/downloads"
         ];
-      };
-
-      huntarr = {
-        image = "ghcr.io/plexguide/huntarr:latest";
-        autoStart = true;
-        extraOptions = [
-          "--network=media-network"
-          "--pull=always"
-        ];
-        ports = [
-          "9705:9705"
-        ];
-        volumes = [
-          "/var/lib/huntarr:/config"
-        ];
-        environment = {
-          TZ = "America/New_York";
-        };
       };
 
       unpackerr = {
