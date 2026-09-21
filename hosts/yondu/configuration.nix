@@ -38,6 +38,7 @@
     "d /var/lib/youtarr/images 0755 root root -"
     "d /var/lib/youtarr/config 0755 root root -"
     "d /var/lib/youtarr/jobs 0755 root root -"
+    "d /var/lib/minuspod 0750 1000 1000 -"
     "d /mnt/media 0755 root root -"
     "d /mnt/media/downloads 0755 root root -"
     "d /mnt/media/web 0755 root root -"
@@ -45,9 +46,12 @@
 
   extra-services.mount_media.enable = true;
 
+  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 8000 ];
+
   sops.secrets.gluetun-env = {};
   sops.secrets.unpackerr-env = {};
   sops.secrets.youtarr-env = {};
+  sops.secrets.minuspod-env = {};
 
   virtualisation.podman = {
     enable = true;
@@ -429,6 +433,49 @@
           "/var/lib/youtarr/images:/app/server/images"
           "/var/lib/youtarr/config:/app/config"
           "/var/lib/youtarr/jobs:/app/jobs"
+        ];
+      };
+
+      minuspod = {
+        image = "docker.io/ttlequals0/minuspod:stable-cpu@sha256:bc86b03ba884f9d04b41029913e2d3cf7829191ed9f7edc94654ea4696d53678";
+        autoStart = true;
+        user = "1000:1000";
+        extraOptions = [
+          "--network=media-network"
+          "--pull=always"
+          "--security-opt=no-new-privileges:true"
+          "--cap-drop=ALL"
+          "--stop-timeout=360"
+          "--health-cmd=curl -f http://localhost:8000/api/v1/health || exit 1"
+          "--health-interval=30s"
+          "--health-timeout=5s"
+          "--health-retries=3"
+          "--health-start-period=30s"
+        ];
+        environmentFiles = [
+          config.sops.secrets.minuspod-env.path
+        ];
+        environment = {
+          LLM_PROVIDER = "openai-compatible";
+          OPENAI_BASE_URL = "https://api.minimax.io/v1";
+          OPENAI_MODEL = "MiniMax-M3";
+          WHISPER_BACKEND = "local";
+          WHISPER_MODEL = "tiny";
+          WHISPER_DEVICE = "cpu";
+          OMP_NUM_THREADS = "4";
+          BASE_URL = "http://yondu.skink-galaxy.ts.net:8000";
+          MINUSPOD_PORT = "8000";
+          MINUSPOD_REQUIRE_AUTH = "true";
+          MINUSPOD_ALLOW_PUBLIC_PROCESSING = "false";
+          SESSION_COOKIE_SECURE = "auto";
+          MINUSPOD_TRUSTED_PROXY_COUNT = "0";
+          MAX_AUDIO_DOWNLOAD_MB = "500";
+        };
+        ports = [
+          "100.121.147.57:8000:8000"
+        ];
+        volumes = [
+          "/var/lib/minuspod:/app/data"
         ];
       };
     };
