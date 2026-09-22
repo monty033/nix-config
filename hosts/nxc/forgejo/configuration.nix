@@ -1,7 +1,6 @@
 { pkgs, config, modulesPath, inputs, outputs, ... }:
 
 let
-  forgejo-mcp = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.forgejo-mcp;
   nodejs_22 = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.nodejs_22;
 in
 {
@@ -103,29 +102,7 @@ in
     restartUnits = [ "gitea-runner-default.service" ];
   };
 
-  # forgejo-mcp: MCP server for AI tools to interact with Forgejo
-  sops.secrets."forgejo-mcp-env" = {
-    mode = "0400";
-    restartUnits = [ "forgejo-mcp.service" ];
-  };
-
-  systemd.services.forgejo-mcp = {
-    description = "Forgejo MCP Server (SSE)";
-    after = [ "network.target" "forgejo.service" ];
-    wants = [ "forgejo.service" ];
-    wantedBy = [ "multi-user.target" ];
-
-    serviceConfig = {
-      Type = "simple";
-      DynamicUser = true;
-      EnvironmentFile = config.sops.secrets."forgejo-mcp-env".path;
-      ExecStart = "${forgejo-mcp}/bin/forgejo-mcp --transport sse --url https://git.montycasa.net --sse-port 8080";
-      Restart = "on-failure";
-      RestartSec = 5;
-    };
-  };
-
-  networking.firewall.allowedTCPPorts = [ 3000 22 8080 ];
+  networking.firewall.allowedTCPPorts = [ 3000 22 ];
 
   system.stateVersion = "25.05";
 }
