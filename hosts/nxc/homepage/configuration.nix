@@ -74,7 +74,7 @@ in
         { "Home Automation" = { tab = "Home"; }; }
         { NVR = { tab = "Home"; }; }
         { "Media Servers" = { tab = "Media"; style = "row"; columns = 1; }; }
-        { Aar = { tab = "Media"; style = "row"; columns = 3; }; }
+        { Arr = { tab = "Media"; style = "row"; columns = 3; }; }
         { Apps = { tab = "Apps"; style = "row"; columns = 3; }; }
         { Status = { style = "row"; columns = 2; }; }
       ];
@@ -692,7 +692,7 @@ in
         ];
       }
       {
-        "Aar" = [
+        "Arr" = [
           {
             "qBittorrent" = {
               href = "https://qbittorrent.montycasa.net";
@@ -797,6 +797,13 @@ in
               icon = "sh-youtarr.png";
             };
           }
+          {
+            "MinusPod" = {
+              href = "https://minuspod.montycasa.net/ui/";
+              siteMonitor = "https://minuspod.montycasa.net/ui/";
+              icon = "sh-minuspod.svg";
+            };
+          }
         ];
       }
       {
@@ -806,13 +813,6 @@ in
               href = "https://drive.montycasa.com";
               siteMonitor = "https://drive.montycasa.com";
               icon = "sh-nextcloud.png";
-            };
-          }
-          {
-            "MinusPod" = {
-              href = "https://minuspod.montycasa.net/ui/";
-              siteMonitor = "https://minuspod.montycasa.net/ui/";
-              icon = "sh-minuspod.svg";
             };
           }
           {
