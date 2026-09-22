@@ -809,6 +809,13 @@ in
             };
           }
           {
+            "MinusPod" = {
+              href = "https://minuspod.montycasa.net/ui/";
+              siteMonitor = "https://minuspod.montycasa.net/ui/";
+              icon = "sh-minuspod.svg";
+            };
+          }
+          {
             "Forgejo" = {
               href = "https://git.montycasa.net";
               siteMonitor = "https://git.montycasa.net";
