@@ -117,6 +117,12 @@
         upstream = "192.168.86.114:3087"; 
       };
 
+      # MinusPod is intentionally reachable through the local/Tailscale proxy only.
+      "minuspod.montycasa.net" = {
+        protocol = "http";
+        upstream = "100.121.147.57:8000";
+      };
+
       "frigate.montycasa.net" = { 
         protocol = "http"; 
         upstream = "192.168.86.116:5000"; 
