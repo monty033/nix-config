@@ -124,6 +124,7 @@ in {
 
     users.groups.nookbridge = {};
     users.groups.nookbridge-clients = {};
+    users.groups.nookbridge-operators = {};
     users.users.nookbridge = {
       isSystemUser = true;
       group = "nookbridge";

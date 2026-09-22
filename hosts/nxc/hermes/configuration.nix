@@ -1192,7 +1192,7 @@ in
 
   users.users.hermes = {
     linger = true;
-    extraGroups = [ "nookbridge-clients" ];
+    extraGroups = [ "nookbridge-clients" "nookbridge-operators" ];
   };
 
   # NixOS's switch-to-configuration reloads lingering user units after

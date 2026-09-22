@@ -297,6 +297,7 @@ in
       # modes must match what the production module installs.
       users.groups.nookbridge = { };
       users.groups.nookbridge-clients = { };
+      users.groups.nookbridge-operators = { };
 
       users.users.nookbridge = {
         isSystemUser = true;
