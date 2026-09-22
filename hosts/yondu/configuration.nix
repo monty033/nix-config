@@ -444,12 +444,12 @@
           WHISPER_MODEL = "tiny";
           WHISPER_DEVICE = "cpu";
           OMP_NUM_THREADS = "4";
-          BASE_URL = "http://yondu.skink-galaxy.ts.net:8000";
+          BASE_URL = "https://minuspod.montycasa.net";
           MINUSPOD_PORT = "8000";
           MINUSPOD_REQUIRE_AUTH = "true";
           MINUSPOD_ALLOW_PUBLIC_PROCESSING = "false";
           SESSION_COOKIE_SECURE = "auto";
-          MINUSPOD_TRUSTED_PROXY_COUNT = "0";
+          MINUSPOD_TRUSTED_PROXY_COUNT = "1";
           MAX_AUDIO_DOWNLOAD_MB = "500";
         };
         ports = [
