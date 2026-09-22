@@ -78,6 +78,7 @@ in
       gnumake
       gnutar
       glibc
+      glibc.static
       glibc.getent
       gzip
       nix
