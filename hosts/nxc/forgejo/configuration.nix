@@ -69,6 +69,7 @@ in
       coreutils
       curl
       cacert
+      diffutils
       findutils
       gawk
       gcc
