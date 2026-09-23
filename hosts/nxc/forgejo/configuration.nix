@@ -68,6 +68,7 @@ in
       binutils
       coreutils
       curl
+      cacert
       findutils
       gawk
       gcc
@@ -93,6 +94,7 @@ in
   systemd.services.gitea-runner-default = {
     after = [ "forgejo.service" ];
     wants = [ "forgejo.service" ];
+    environment.NIX_SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
     startLimitBurst = 10;
     startLimitIntervalSec = 120;
   };
