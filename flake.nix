@@ -35,13 +35,13 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned to pick up inline Markdown mark rendering (bold/italic/code),
-    # which was missing at the prior pin: create-note only converted block
-    # structure (headings/lists/checklists), so `**bold**`/`*italic*`/`` `code` ``
-    # were stored as literal escaped text inside <p> tags. Deployment policy
-    # remains read-write with bounded single-note delete capability.
+    # Repinned after NookBridge Wave 1 merged on 2026-09-26: native
+    # horizontal rules, fenced code blocks, blockquotes, Markdown tables,
+    # and hardened nested/block-capable list boundaries in the write codec.
+    # Deployment policy remains read-write with bounded single-note delete
+    # capability.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=35e30d4be87ea606dd855a9f25ed6eede640ac78";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=26bcc64718f1332108d688763769047673585fdf";
       flake = false;
     };
 
