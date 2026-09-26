@@ -502,20 +502,27 @@ in
     ];
 
     settings = {
-      # Default conversation model is now GPT-5.6 Luna via Codex at
-      # `high` reasoning. Auxiliary review (see auxiliary.review) is
-      # configured separately on MiniMax-M3 at xhigh so the reviewer
-      # stays strictly more deliberate than the parent conversation —
-      # independent review semantics are preserved.
+      # Default conversation model is Claude Haiku 4.5 via Claude Pro
+      # subscription at `medium` reasoning. Haiku rejects adaptive thinking
+      # upstream (model_catalog.NO_ADAPTIVE_THINKING); reasoning_effort
+      # applies but omit `thinking` block at call sites.
+      # Auxiliary review (see auxiliary.review) is configured separately
+      # on MiniMax-M3 at xhigh so the reviewer stays strictly more
+      # deliberate than the parent conversation — independent review
+      # semantics are preserved.
       model = {
-        default = "gpt-5.6-luna";
-        provider = "openai-codex";
-        reasoning_effort = "high";
+        default = "claude-haiku-4-5-20251001";
+        provider = "claude-subscription-directsdk-experimental";
+        reasoning_effort = "medium";
         # User-defined model aliases — resolved before catalog lookup.
         # Checked BEFORE built-in short names (sonnet/grok/...).
         # See hermes_cli/model_switch.py::resolve_alias().
-        # `mm` is the previous default kept as a stable short name.
+        # Strings of '<provider>/<model>' are split on '/' into provider + model.
         aliases = {
+          haiku = "claude-subscription-directsdk-experimental/claude-haiku-4-5-20251001";
+          sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5";
+          opus = "claude-subscription-directsdk-experimental/claude-opus-5-5";
+          # Preserve Luna/Terra/Sol as openai-codex for fallback/MoA
           luna = "openai-codex/gpt-5.6-luna";
           terra = "openai-codex/gpt-5.6-terra";
           sol = "openai-codex/gpt-5.6-sol";
@@ -813,7 +820,7 @@ in
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
-          "gpt-5.6-luna" = "high";
+          "claude-haiku-4-5-20251001" = "medium";
         };
         # Surface-aware verify-before-finish: ON for CLI/TUI/desktop/programmatic
         # surfaces where the verification narrative is useful, OFF for messaging
