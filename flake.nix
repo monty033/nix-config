@@ -35,11 +35,13 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Pinned to the merged Stage 9 source tree with breadcrumbs fallback;
-    # deployment policy is explicitly read-write with bounded single-note
-    # delete capability.
+    # Repinned to pick up inline Markdown mark rendering (bold/italic/code),
+    # which was missing at the prior pin: create-note only converted block
+    # structure (headings/lists/checklists), so `**bold**`/`*italic*`/`` `code` ``
+    # were stored as literal escaped text inside <p> tags. Deployment policy
+    # remains read-write with bounded single-note delete capability.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=804e9c61a4bef3b35c68fa475589fdb7729d910d";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=35e30d4be87ea606dd855a9f25ed6eede640ac78";
       flake = false;
     };
 
