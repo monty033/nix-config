@@ -515,8 +515,8 @@ in
         # Strings of '<provider>/<model>' are split on '/' into provider + model.
         aliases = {
           haiku = "claude-subscription-directsdk-experimental/claude-haiku-4-5-20251001";
-          sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5";
-          opus = "claude-subscription-directsdk-experimental/claude-opus-5-5";
+          sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5[1m]";
+          opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
           luna = "openai-codex/gpt-6-luna";
           sol = "openai-codex/gpt-6-sol";
         };
@@ -528,7 +528,7 @@ in
       # individual worker.
       delegation = {
         provider = "claude-subscription-directsdk-experimental";
-        model = "claude-sonnet-5";
+        model = "claude-sonnet-5[1m]";
         max_concurrent_children = 2;
         max_spawn_depth = 1;
         orchestrator_enabled = true;
@@ -551,7 +551,7 @@ in
       # crosses immediately to Claude Sonnet, then Haiku for a lower-cost
       # second attempt within the Claude subscription.
       fallback_providers = [
-        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
+        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
       ];
 
@@ -582,11 +582,11 @@ in
         presets.max = {
           reference_models = [
             { provider = "openai-codex"; model = "gpt-6-sol"; }
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
           ];
           aggregator = {
             provider = "claude-subscription-directsdk-experimental";
-            model = "claude-opus-5-5";
+            model = "claude-opus-5-5[1m]";
           };
           max_tokens = 4096;
           reference_max_tokens = 700;
@@ -636,7 +636,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
           ];
         };
 
@@ -663,7 +663,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
           ];
         };
 
@@ -674,7 +674,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
           ];
         };
 
@@ -686,7 +686,7 @@ in
           model = "gpt-6-sol";
           reasoning_effort = "xhigh";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-opus-5-5"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-opus-5-5[1m]"; }
           ];
         };
       };
@@ -729,8 +729,8 @@ in
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
           "claude-haiku-4-5-20251001" = "medium";
-          "claude-sonnet-5" = "high";
-          "claude-opus-5-5" = "high";
+          "claude-sonnet-5[1m]" = "medium";
+          "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "medium";
           "gpt-6-sol" = "high";
         };
