@@ -174,7 +174,6 @@ let
     (python312.pkgs.requiredPythonModules [ mnemosyneMemory mnemosyneHermes ]);
   hermes-scripts = pkgs.runCommandLocal "hermes-scripts" { } ''
     mkdir -p $out/dns_migration
-    install -m 0555 ${../../../scripts/bernie/model_worker.py} $out/model_worker.py
     install -m 0555 ${../../../scripts/dns_migration/switch_dns_path.py} $out/dns_migration/switch_dns_path.py
   '';
   calendarPython = python312.withPackages (ps: [ ps.icalendar ]);
@@ -502,17 +501,13 @@ in
     ];
 
     settings = {
-      # Default conversation model is Claude Haiku 4.5 via Claude Pro
-      # subscription at `medium` reasoning. Haiku rejects adaptive thinking
-      # upstream (model_catalog.NO_ADAPTIVE_THINKING); reasoning_effort
-      # applies but omit `thinking` block at call sites.
-      # Auxiliary review (see auxiliary.review) is configured separately
-      # on MiniMax-M3 at xhigh so the reviewer stays strictly more
-      # deliberate than the parent conversation — independent review
-      # semantics are preserved.
+      # Default conversation model is GPT-6 Sol at medium reasoning. Claude and
+      # Codex are the only active model families: Sol owns the conversational
+      # front door, Claude Sonnet is the single native delegation target, and
+      # explicit aliases preserve manual model selection when needed.
       model = {
-        default = "claude-haiku-4-5-20251001";
-        provider = "claude-subscription-directsdk-experimental";
+        default = "gpt-6-sol";
+        provider = "openai-codex";
         reasoning_effort = "medium";
         # User-defined model aliases — resolved before catalog lookup.
         # Checked BEFORE built-in short names (sonnet/grok/...).
@@ -522,26 +517,18 @@ in
           haiku = "claude-subscription-directsdk-experimental/claude-haiku-4-5-20251001";
           sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5";
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5";
-          # Preserve Luna/Terra/Sol as openai-codex for fallback/MoA
-          luna = "openai-codex/gpt-5.6-luna";
-          terra = "openai-codex/gpt-5.6-terra";
-          sol = "openai-codex/gpt-5.6-sol";
-          mm = "minimax/MiniMax-M3";
-          # `mimo` replaces the retired `flash` alias (deepseek-v4-flash).
-          # Higher opencode-go weekly quota than flash; same provider.
-          mimo = "opencode-go/mimo-v2.5";
+          luna = "openai-codex/gpt-6-luna";
+          sol = "openai-codex/gpt-6-sol";
         };
       };
 
       # Native delegate_task controls (Bernie's delegation path).
-      # Worker model is MiniMax-M3 via the minimax Portal so children
-      # run on the Portal target and the daily CLI primary quota is
-      # reserved for the parent conversation. Fallback chain inherits
-      # the global fallback_providers (Luna first, then MiMo). Session
-      # /reasoning --session still wins for individual workers.
+      # Claude Sonnet gives delegated work a separate provider and quota pool
+      # from the Sol parent. Session /reasoning --session still wins for an
+      # individual worker.
       delegation = {
-        provider = "minimax";
-        model = "MiniMax-M3";
+        provider = "claude-subscription-directsdk-experimental";
+        model = "claude-sonnet-5";
         max_concurrent_children = 2;
         max_spawn_depth = 1;
         orchestrator_enabled = true;
@@ -560,38 +547,20 @@ in
         idle_minutes = 2880;
       };
 
-      # Fallbacks are ordered availability routes: Codex Luna sits ahead
-      # of OpenCode Go MiMo 2.5 so a single proxy/provider outage does
-      # not exhaust the cheap-MiMo budget before reaching the higher-
-      # quality review model. The prior opencode-go / minimax-m3 entry
-      # was removed because the default model is already minimax
-      # MiniMax-M3, so a same-vendor retry of the same model added no
-      # availability value while still spending opencode-go quota.
+      # Fallbacks are availability routes, not quality routing. A Codex outage
+      # crosses immediately to Claude Sonnet, then Haiku for a lower-cost
+      # second attempt within the Claude subscription.
       fallback_providers = [
-        { provider = "openai-codex"; model = "gpt-5.6-luna"; }
-        { provider = "opencode-go"; model = "mimo-v2.5"; }
+        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
+        { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
       ];
 
-      # Mixture of Agents presets. Five profiles, each tuned for a
-      # different cost/quality tradeoff:
-      #   - standard (default): balanced MoA — Codex Sol aggregator with
-      #     cross-family references (minimax MiniMax-M3, opencode-go MiMo
-      #     2.5 Pro, opencode-go Qwen 3.7 Plus). Brings productive
-      #     disagreement from non-overlapping training lineages.
-      #   - max: heavy MoA — same Codex Sol aggregator over opencode-go
-      #     glm/deepseek-pro/kimi references. Best for deep multi-
-      #     perspective synthesis where latency is acceptable. Kept as a
-      #     proven safety net; opt in via `/model max --provider moa`.
-      #   - tool: tool-calling specialist — Codex Terra aggregator with
-      #     opencode-go Tencent Hy3 (tool-use specialist), minimax
-      #     MiniMax-M3 (diverse generalist), and opencode-go qwen3.7-plus
-      #     (cheap diverse tiebreaker — formerly deepseek-v4-flash).
-      #   - coder: code-tuned aggregator (Codex Terra) with coding-
-      #     oriented references. For implementation tasks and code review.
-      #   - lite: cheap/fast aggregator (minimax MiniMax-M3) for
-      #     short-turn routing and simple queries. Two opencode-go
-      #     references (mimo-v2.5 + qwen3.7-plus — both high weekly
-      #     quota, different training lineages). Lowest cost.
+      # Mixture of Agents presets. Keep two explicit cross-provider choices:
+      #   - standard (default): Haiku + Luna advise a Sol aggregator.
+      #   - max: Sol + Sonnet advise an Opus aggregator for deliberate,
+      #     expensive one-shot work.
+      # Retired presets remain explicitly disabled because the NixOS module
+      # deep-merges settings into mutable config.yaml and omitted keys survive.
       # Use via `/model <preset> --provider moa` or one-shot
       # `/moa <prompt>`. Set per-preset `enabled = false` to fall back
       # to the aggregator acting alone.
@@ -599,185 +568,125 @@ in
         default_preset = "standard";
         presets.standard = {
           reference_models = [
-            { provider = "minimax"; model = "MiniMax-M3"; }
-            { provider = "opencode-go"; model = "MiMo 2.5 Pro"; }
-            { provider = "opencode-go"; model = "qwen3.7-plus"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "openai-codex"; model = "gpt-6-luna"; }
           ];
           aggregator = {
             provider = "openai-codex";
-            model = "gpt-5.6-sol";
-          };
-          max_tokens = 4096;
-          reference_max_tokens = 700;
-          enabled = true;
-        };
-        presets.max = {
-          reference_models = [
-            { provider = "opencode-go"; model = "glm-5.2"; }
-            { provider = "opencode-go"; model = "deepseek-v4-pro"; reasoning_effort = "high"; }
-            { provider = "opencode-go"; model = "kimi-k2.7-code"; }
-          ];
-          aggregator = {
-            provider = "openai-codex";
-            model = "gpt-5.6-sol";
-          };
-          max_tokens = 4096;
-          reference_max_tokens = 700;
-          enabled = true;
-        };
-        presets.tool = {
-          reference_models = [
-            { provider = "opencode-go"; model = "tencent/hy3"; }
-            { provider = "minimax"; model = "MiniMax-M3"; }
-            # qwen3.7-plus replaces deepseek-v4-flash as the cheap diverse
-            # tiebreaker — higher opencode-go weekly quota.
-            { provider = "opencode-go"; model = "qwen3.7-plus"; }
-          ];
-          aggregator = {
-            provider = "openai-codex";
-            model = "gpt-5.6-terra";
+            model = "gpt-6-sol";
           };
           max_tokens = 4096;
           reference_max_tokens = 600;
           enabled = true;
         };
-        presets.coder = {
+        presets.max = {
           reference_models = [
-            { provider = "opencode-go"; model = "kimi-k2.7-code"; }
-            { provider = "opencode-go"; model = "glm-5.2"; }
-            { provider = "opencode-go"; model = "deepseek-v4-pro"; }
+            { provider = "openai-codex"; model = "gpt-6-sol"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
           ];
           aggregator = {
-            provider = "openai-codex";
-            model = "gpt-5.6-terra";
+            provider = "claude-subscription-directsdk-experimental";
+            model = "claude-opus-5-5";
           };
           max_tokens = 4096;
           reference_max_tokens = 700;
           enabled = true;
         };
-        presets.lite = {
-          reference_models = [
-            # mimo-v2.5 (formerly deepseek-v4-flash) + qwen3.7-plus — both
-            # cheap, both with high opencode-go weekly quota, different
-            # training lineages for productive disagreement at the lite tier.
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "opencode-go"; model = "qwen3.7-plus"; }
-          ];
-          aggregator = {
-            provider = "minimax";
-            model = "MiniMax-M3";
-          };
-          reference_max_tokens = 400;
-        };
+        presets.tool.enabled = false;
+        presets.coder.enabled = false;
+        presets.lite.enabled = false;
       };
 
-      # Auxiliary task assignments. Each task declares its primary provider,
-      # model, reasoning level, and an ordered fallback_chain. Reasoning is
-      # task-level in installed Hermes 0.20.0 (auxiliary_client.py:7558-7601)
-      # and the same value is passed to every fallback candidate. Per-entry
-      # reasoning is not honored; per-entry timeout is supported but unused
-      # here. Provider/model IDs are verbatim from the OpenCode Go docs page
-      # https://opencode.ai/docs/go/#endpoints and the live /v1/models
-      # catalog.
+      # Auxiliary task assignments. Luna handles inexpensive background work;
+      # Claude provides a separate-provider fallback. Reasoning is task-level
+      # and applies uniformly to every fallback candidate.
       auxiliary = {
-        provider = "minimax";
-        model = "MiniMax-M2.7";
+        provider = "openai-codex";
+        model = "gpt-6-luna";
 
         web_extract = {
-          provider = "minimax";
-          model = "MiniMax-M2.7";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
           ];
         };
 
         compression = {
-          provider = "minimax";
-          model = "MiniMax-M3";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
           ];
         };
 
         skills_hub = {
-          provider = "minimax";
-          model = "MiniMax-M2.7";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
           ];
         };
 
         mcp = {
-          provider = "minimax";
-          model = "MiniMax-M2.7";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
           ];
         };
 
         approval = {
-          provider = "minimax";
-          model = "MiniMax-M3";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
           ];
         };
 
         title_generation = {
-          provider = "minimax";
-          model = "MiniMax-M2.7";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
           ];
         };
 
         triage_specifier = {
-          provider = "minimax";
-          model = "MiniMax-M2.7";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.5"; }
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
           ];
         };
 
-        # Vision. Primary MiMo V2.5, then Luna, then the experimental
-        # DeepSeek V4 Flash vision model documented by OpenCode Go.
+        # Luna is the verified vision-capable Codex route. Claude Sonnet is a
+        # separate-provider fallback and must pass the post-deploy image smoke.
         vision = {
-          provider = "opencode-go";
-          model = "mimo-v2.5";
+          provider = "openai-codex";
+          model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
-            { provider = "opencode-go"; model = "deepseek-v4-flash-vision-exp"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5"; }
           ];
         };
 
-        # Review. /review launches a full reviewer subagent. The default
-        # conversation is now Luna at `high`, so the reviewer MUST be a
-        # strictly more deliberate target to preserve independent review
-        # semantics. MiniMax-M3 at xhigh is the canonical reviewer
-        # primary; Luna is the immediate fallback. Reasoning applies
-        # uniformly because per-entry overrides are unsupported.
+        # /review launches a full reviewer subagent. Sol at xhigh is strictly
+        # more deliberate than the Sol/medium parent; Claude Opus provides the
+        # cross-provider availability fallback.
         review = {
-          provider = "minimax";
-          model = "MiniMax-M3";
+          provider = "openai-codex";
+          model = "gpt-6-sol";
           reasoning_effort = "xhigh";
           fallback_chain = [
-            { provider = "openai-codex"; model = "gpt-5.6-luna"; }
-            { provider = "opencode-go"; model = "deepseek-v4-flash"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-opus-5-5"; }
           ];
         };
       };
@@ -798,9 +707,8 @@ in
       # Voice requests get Home Assistant plus one narrow health write action.
       # They never receive generic file, shell, browser, or Google tools.
       platform_toolsets.api_server = [ "homeassistant" "health_log" ];
-      # claude-subscription-directsdk-experimental adds a selectable Claude
-      # Pro/Max route (conversation model). The default model and provider are
-      # unchanged; nothing falls back to it automatically.
+      # claude-subscription-directsdk-experimental provides selectable Claude
+      # Pro routes, native delegated work, and Codex availability fallbacks.
       plugins.enabled = [ "health-log" "hermes-relay" "hermes-mnemosyne" "claude-subscription-directsdk-experimental" ];
 
       # The v0.19 migration is blocked in Nix-managed mode. Declare its schema
@@ -821,6 +729,10 @@ in
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
           "claude-haiku-4-5-20251001" = "medium";
+          "claude-sonnet-5" = "high";
+          "claude-opus-5-5" = "high";
+          "gpt-6-luna" = "medium";
+          "gpt-6-sol" = "high";
         };
         # Surface-aware verify-before-finish: ON for CLI/TUI/desktop/programmatic
         # surfaces where the verification narrative is useful, OFF for messaging
@@ -837,6 +749,9 @@ in
         # across the rewrite, so gateway routing, /goal, and session_search
         # stay coherent across long topic sessions.
         threshold = 0.85;
+        # Deliberately cap live conversation context at 300k even when a model
+        # advertises a larger window: huge prefixes burn subscription allowance,
+        # weaken focus, and are less cache-friendly than a compacted stable prefix.
         threshold_tokens = 300000;
         target_ratio = 0.20;
         protect_last_n = 120;
@@ -948,17 +863,15 @@ in
           };
         };
 
-        # Voice Assistant endpoint. HA's OpenClaw Assistant sends model
-        # `bernie-voice`, which is routed to mimo-v2.5 (formerly DeepSeek V4
-        # Flash) without changing Bernie's MiniMax-M3 default for Telegram and
-        # other gateway clients. mimo-v2.5 has higher opencode-go weekly quota.
+        # Voice Assistant endpoint. Keep the latency-sensitive route on Luna
+        # without changing the Sol default for Telegram and other clients.
         api_server = {
           enabled = true;
           extra = {
             model_name = "hermes-agent";
             model_routes.bernie-voice = {
-              provider = "opencode-go";
-              model = "mimo-v2.5";
+              provider = "openai-codex";
+              model = "gpt-6-luna";
             };
           };
         };
@@ -1020,9 +933,6 @@ in
     documents."SOUL.md" = builtins.readFile ./documents/SOUL.md;
   };
 
-  environment.etc."hermes/bernie/worker-registry.json" = {
-    source = ./delegation/worker-registry.json;
-  };
 
   # Inject allowlist into the systemd environment so hermes's os.getenv()
   # check sees it at startup (the module writes these to .env but the gateway
@@ -1032,8 +942,6 @@ in
     HERMES_MANAGED = "true";
     MATTERMOST_ALLOWED_USERS = "yyhr83fpj3n3fpnjzf3o1zah6r";
     WIKI_PATH = "/var/lib/hermes/vault/MontyVault/Hermes/Wiki";
-    BERNIE_WORKER_REGISTRY = "/etc/hermes/bernie/worker-registry.json";
-    BERNIE_WORKER_EXECUTABLE = "/var/lib/hermes/scripts/bernie/model_worker.py";
     PYTHONPATH = mnemosynePythonPath;
   };
 
@@ -1048,12 +956,12 @@ in
 
   systemd.tmpfiles.rules = [
     "d /var/lib/hermes/scripts 0755 hermes users -"
-    "L+ /var/lib/hermes/scripts/bernie - - - - ${hermes-scripts}"
+    "r /var/lib/hermes/scripts/bernie"
     "L+ /var/lib/hermes/scripts/dns_migration - - - - ${hermes-scripts}/dns_migration"
     "z /var/lib/hermes/.hermes/.env 0600 hermes users -"
     "d /var/lib/hermes/.local 0700 hermes users -"
     "d /var/lib/hermes/.local/state 0700 hermes users -"
-    "d /var/lib/hermes/.local/state/bernie-delegation 0700 hermes users -"
+    "R /var/lib/hermes/.local/state/bernie-delegation"
     "d /var/lib/hermes/.cache 0700 hermes users -"
     "d /var/lib/hermes/.hermes/mnemosyne 0750 hermes users -"
     "d /var/lib/hermes/.hermes/plugins 0750 hermes users -"
@@ -1072,11 +980,6 @@ in
     "z /var/lib/hermes/.hermes/mnemosyne/data/shared/mnemosyne.db-shm 0600 hermes users -"
   ];
 
-  # bernie-lane-validation.service and bernie-lane-validation.timer were
-  # removed when the runtime lane-validation automation was shelved in favor
-  # of native Hermes delegate_task. The validator script is preserved at
-  # scripts/bernie/_shelved/validate_lanes.py and the systemd units can be
-  # restored by reverting that shelf PR.
 
   systemd.services.tasknotes-calendar-publish = {
     description = "Publish the validated TaskNotes calendar to Bifrost";
