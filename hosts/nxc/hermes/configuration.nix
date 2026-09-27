@@ -719,6 +719,13 @@ in
       # reliability boundary, not a one-off runtime default.
       gateway.delivery_ledger = true;
 
+      # Picker hygiene: the section-2 credential ladder in the model picker reads the shared
+      # Claude Code OAuth credential file (~/.claude/.credentials.json) for the native
+      # anthropic row even though native anthropic has no key and no route here — that file's
+      # real consumer is the subscription DirectSDK plugin, whose models surface separately.
+      # Excluding anthropic removes the phantom group from /model with one declarative knob.
+      model_catalog.excluded_providers = [ "anthropic" ];
+
       agent = {
         max_turns = 90;
         gateway_timeout = 1800;
