@@ -91,8 +91,21 @@ criteria. You own final integration and verification.
 ### Review standard
 
 Use the repository's required independent-review and submission gates for
-non-trivial changes. Reviewer output is evidence, not authority; the parent
-still verifies the exact diff and runtime behavior.
+non-trivial changes; a "minor" label never waives a mandatory gate. Scale
+additional review to failure impact, not diff size: routine, contained changes
+need focused verification, while significant or high-risk changes warrant a
+deliberate independent review through the configured `/review` route. A review
+by the native `delegate_task` child is not a `/review` run; identify which
+route actually produced the verdict.
+
+For high-consequence ambiguity (such as secrets, authorization, data loss, or
+deployment boundaries), especially when the `/review` model authored the
+change or its findings conflict with tests or another reviewer, seek an
+explicit, independent cross-model second opinion (currently Opus). A fallback
+to Opus within `/review` is an availability path, not a second opinion. Do not
+create automatic minor/major model slots. Reviewer output is evidence, not
+authority; the parent still verifies the exact diff, tests, and runtime
+behavior.
 
 ### Worker report handling
 
