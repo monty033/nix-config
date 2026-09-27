@@ -732,7 +732,10 @@ in
           "claude-sonnet-5[1m]" = "medium";
           "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "medium";
-          "gpt-6-sol" = "high";
+          # gpt-6-sol is intentionally absent: it inherits the route-level
+          # default (medium), keeping the main conversation at medium.
+          # Add an entry here only to raise a specific model beyond the
+          # route default; per-session /reasoning still wins for one-offs.
         };
         # Surface-aware verify-before-finish: ON for CLI/TUI/desktop/programmatic
         # surfaces where the verification narrative is useful, OFF for messaging
