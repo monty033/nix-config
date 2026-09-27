@@ -108,7 +108,7 @@ scripts/nix-pr submit --dry-run
 scripts/nix-pr submit
 ```
 
-Use `scripts/nix-pr status` as the first troubleshooting command. Use `--host NAME` for a shared Nix change when the affected host cannot be inferred from its path, or `--all-hosts` when every flake configuration must be built. Production Nix and systemd changes require a saved independent review from **gpt-5.6-luna at xhigh reasoning**, passed through `--second-review-file`; documentation-only changes do not. Set xhigh explicitly with the standalone Codex CLI: `codex exec -m gpt-5.6-luna -c model_reasoning_effort=xhigh` — the Hermes config default for Luna is `high`, not `xhigh`. If Luna is unavailable, stop rather than silently substituting another model. The wrapper verifies the review artifact and records its digest; model selection belongs to the workflow guidance, not the wrapper.
+Use `scripts/nix-pr status` as the first troubleshooting command. Use `--host NAME` for a shared Nix change when the affected host cannot be inferred from its path, or `--all-hosts` when every flake configuration must be built. Production Nix and systemd changes require a saved independent read-only review of the exact staged diff, passed through `--second-review-file`; documentation-only changes do not. Use the configured review route unless the task explicitly names another reviewer. If the required reviewer is unavailable, stop rather than silently substituting another model. The wrapper verifies the review artifact and records its digest; model selection belongs to the workflow guidance, not the wrapper.
 
 Validation receipts are stored outside the repository under the user's XDG state directory. Run the test suite with:
 

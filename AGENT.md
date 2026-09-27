@@ -8,7 +8,7 @@ When asked to review and commit changes in this repository:
 2. For a new task, start from a clean checkout with `scripts/nix-pr start <slug>`.
 3. Run `git diff` and `git status` to identify all changes.
 4. Group changes by logical concern and stage only the intended files for one group.
-5. Run `scripts/nix-pr check`; for production Nix or systemd changes, first obtain a saved independent review from **gpt-5.6-luna at xhigh reasoning** and pass it with `--second-review-file`. Set xhigh explicitly with the standalone Codex CLI: `codex exec -m gpt-5.6-luna -c model_reasoning_effort=xhigh` — the Hermes config default for Luna is `high`, not `xhigh`. If Luna is unavailable, stop rather than silently substituting another model.
+5. Run `scripts/nix-pr check`; for production Nix or systemd changes, first obtain a saved independent read-only review of the exact staged diff and pass it with `--second-review-file`. Use the configured review route unless the task explicitly names another reviewer. If the required reviewer is unavailable, stop rather than silently substituting another model.
 6. Create the commit with `scripts/nix-pr commit --message-file <path>`.
 7. Submit only when authorized, using `scripts/nix-pr submit`; use `--dry-run` first when appropriate.
 
