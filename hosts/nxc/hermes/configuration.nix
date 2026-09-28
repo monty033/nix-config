@@ -300,7 +300,13 @@ in
     # activation. Restart when the memory provider/settings change so a
     # provider cutover is effective without a manual systemctl command.
     ++ [ (builtins.toJSON config.services.hermes-agent.settings.memory) ]
-    ++ [ (builtins.toJSON config.services.hermes-agent.settings.mcp_servers) nookbridge ];
+    ++ [
+      (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
+      # The identity file is installed at activation, but the gateway must
+      # restart to load its new instructions after a SOUL.md change.
+      (builtins.hashString "sha256" config.services.hermes-agent.hermesHomeFiles."SOUL.md")
+      nookbridge
+    ];
   # Memory databases contain private user context. Keep files created by the
   # service private even though the parent state directory is group-accessible.
   systemd.services.hermes-agent.serviceConfig.UMask = lib.mkForce "0077";
@@ -939,8 +945,11 @@ in
 
     };
 
-    # SOUL.md — injected as a workspace document at activation time
+    # Hermes loads SOUL.md from HERMES_HOME, not from workingDirectory.
+    # Keep the preexisting workspace copy sourced from the same file so it
+    # cannot become a stale, conflicting copy after later rebuilds.
     documents."SOUL.md" = builtins.readFile ./documents/SOUL.md;
+    hermesHomeFiles."SOUL.md" = builtins.readFile ./documents/SOUL.md;
   };
 
 
