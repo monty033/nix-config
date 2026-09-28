@@ -507,14 +507,14 @@ in
     ];
 
     settings = {
-      # Default conversation model is GPT-6 Sol at medium reasoning. Claude and
-      # Codex are the only active model families: Sol owns the conversational
+      # Default conversation model is GPT-6 Luna at high reasoning. Claude and
+      # Codex are the only active model families: Luna owns the conversational
       # front door, Claude Sonnet is the single native delegation target, and
       # explicit aliases preserve manual model selection when needed.
       model = {
-        default = "gpt-6-sol";
+        default = "gpt-6-luna";
         provider = "openai-codex";
-        reasoning_effort = "medium";
+        reasoning_effort = "high";
         # User-defined model aliases — resolved before catalog lookup.
         # Checked BEFORE built-in short names (sonnet/grok/...).
         # See hermes_cli/model_switch.py::resolve_alias().
@@ -530,7 +530,7 @@ in
 
       # Native delegate_task controls (Bernie's delegation path).
       # Claude Sonnet gives delegated work a separate provider and quota pool
-      # from the Sol parent. Session /reasoning --session still wins for an
+      # from the Luna parent. Session /reasoning --session still wins for an
       # individual worker.
       delegation = {
         provider = "claude-subscription-directsdk-experimental";
@@ -685,7 +685,7 @@ in
         };
 
         # /review launches a full reviewer subagent. Sol at xhigh is strictly
-        # more deliberate than the Sol/medium parent; Claude Opus provides the
+        # more deliberate than the Luna/high parent; Claude Opus provides the
         # cross-provider availability fallback.
         review = {
           provider = "openai-codex";
@@ -739,16 +739,16 @@ in
         reasoning_effort = "medium";
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
+        # Luna is the conversational default and explicitly uses high here;
+        # the general route baseline remains medium, as does Sol by inheritance.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
           "claude-haiku-4-5-20251001" = "medium";
           "claude-sonnet-5[1m]" = "medium";
           "claude-opus-5-5[1m]" = "medium";
-          "gpt-6-luna" = "medium";
+          "gpt-6-luna" = "high";
           # gpt-6-sol is intentionally absent: it inherits the route-level
-          # default (medium), keeping the main conversation at medium.
-          # Add an entry here only to raise a specific model beyond the
-          # route default; per-session /reasoning still wins for one-offs.
+          # default (medium). Per-session /reasoning still wins for one-offs.
         };
         # Surface-aware verify-before-finish: ON for CLI/TUI/desktop/programmatic
         # surfaces where the verification narrative is useful, OFF for messaging
