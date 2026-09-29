@@ -473,8 +473,18 @@ def fetch_school() -> list[dict]:
     FAMILY_KEYWORDS = [
         "school closed", "schools closed", "holiday", "early dismissal",
         "teacher inservice", "no school", "last student day",
-        "memorial day", "labor day", "no student",
+        "memorial day", "labor day", "no student", "district closed",
     ]
+    # Whole-title matches for named holidays whose SDST titles carry no
+    # closure phrase of their own. Matching these as substrings would also
+    # sweep in longer titles that merely mention the holiday — an assembly, a
+    # concert, a planning meeting — so the title must BE the holiday.
+    # Normalized: lowercased, whitespace collapsed, ASCII apostrophe folded.
+    NAMED_CLOSURE_TITLES = {
+        "indigenous peoples day",
+        "indigenous peoples' day",
+        "thanksgiving break",
+    }
     # ENF/ERD-specific events (not closures, but family should know)
     ENF_ERD_EVENT_KEYWORDS = [
         "report card", "picture day", "color day", "2nd grade parade",
@@ -491,8 +501,10 @@ def fetch_school() -> list[dict]:
         summary = event.get("summary", "")
         summary_lower = summary.lower()
         desc = event.get("description", "")
+        normalized_title = " ".join(summary_lower.replace("’", "'").split())
 
         is_family_type = any(kw in summary_lower for kw in FAMILY_KEYWORDS)
+        is_named_closure_title = normalized_title in NAMED_CLOSURE_TITLES
         is_enf_erd = any(re.search(pat, summary) for pat in ENF_ERD_PATTERNS)
         is_enf_erd_event = is_enf_erd and any(
             kw in summary_lower for kw in ENF_ERD_EVENT_KEYWORDS
@@ -504,7 +516,7 @@ def fetch_school() -> list[dict]:
         is_district_wide = not is_enf_erd and not mentions_hs_ms
 
         include = False
-        if is_family_type and (is_enf_erd or is_district_wide):
+        if (is_family_type or is_named_closure_title) and (is_enf_erd or is_district_wide):
             include = True
         elif is_enf_erd_event:
             include = True

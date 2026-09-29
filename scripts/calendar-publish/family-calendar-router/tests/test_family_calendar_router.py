@@ -239,6 +239,102 @@ class FamilyCalendarRouterTests(unittest.TestCase):
             "Holiday - All Schools Closed/Offices Open",
         )
 
+    def test_fetch_school_includes_new_district_closures(self):
+        summaries = [
+            "Indigenous Peoples' Day",
+            "Thanksgiving Break - District Closed",
+            "District Closed",
+            # Bare holiday name with no closure phrase — whole-title match.
+            "Thanksgiving Break",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            url_file = Path(tmp) / "district"
+            url_file.write_text("https://school.example.invalid/district")
+            original_files = router.SDST_ICAL_URL_FILES
+            router.SDST_ICAL_URL_FILES = [str(url_file)]
+            good = subprocess.CompletedProcess(
+                args=["curl"],
+                returncode=0,
+                stdout=school_ical(*[
+                    f"UID:closure-{i}@example.com\nDTSTART:202610{i+1:02d}\n"
+                    f"DTEND:202610{i+2:02d}\nSUMMARY:{summary}"
+                    for i, summary in enumerate(summaries)
+                ]),
+                stderr="",
+            )
+            try:
+                with patch.object(router.subprocess, "run", return_value=good):
+                    events = router.fetch_school()
+            finally:
+                router.SDST_ICAL_URL_FILES = original_files
+
+        self.assertEqual([event["summary"] for event in events], summaries)
+
+    def test_fetch_school_excludes_non_closure_district_and_hs_ms_events(self):
+        summaries = [
+            "MS/HS MP1 Report Cards Issued",
+            "Middle School Picture Day",
+            "Book Fair",
+            "World Teachers' Day",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            url_file = Path(tmp) / "district"
+            url_file.write_text("https://school.example.invalid/district")
+            original_files = router.SDST_ICAL_URL_FILES
+            router.SDST_ICAL_URL_FILES = [str(url_file)]
+            good = subprocess.CompletedProcess(
+                args=["curl"], returncode=0,
+                stdout=school_ical(*[
+                    f"UID:excluded-{i}@example.com\nDTSTART:202610{i+1:02d}\n"
+                    f"DTEND:202610{i+2:02d}\nSUMMARY:{summary}"
+                    for i, summary in enumerate(summaries)
+                ]),
+                stderr="",
+            )
+            try:
+                with patch.object(router.subprocess, "run", return_value=good):
+                    events = router.fetch_school()
+            finally:
+                router.SDST_ICAL_URL_FILES = original_files
+
+        self.assertEqual(events, [])
+
+    def test_fetch_school_excludes_events_that_merely_name_a_holiday_word(self):
+        # Regression for review finding: keyword matching is substring-based, so
+        # the closure keywords must not sweep in events that only mention the
+        # holiday in passing (concerts, clubs, meetings).
+        summaries = [
+            "Thanksgiving Concert",
+            "Thanksgiving Board Meeting",
+            "Indigenous Students Club",
+            "Indigenous Heritage Night",
+            # These two contain the exact added keywords as substrings, so they
+            # fail if a keyword is ever widened back into plain substring match.
+            "Indigenous Peoples' Day Assembly",
+            "Thanksgiving Break Planning Meeting",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            url_file = Path(tmp) / "district"
+            url_file.write_text("https://school.example.invalid/district")
+            original_files = router.SDST_ICAL_URL_FILES
+            router.SDST_ICAL_URL_FILES = [str(url_file)]
+            good = subprocess.CompletedProcess(
+                args=["curl"], returncode=0,
+                stdout=school_ical(*[
+                    f"UID:nonclosure-{i}@example.com\nDTSTART:202610{i+1:02d}\n"
+                    f"DTEND:202610{i+2:02d}\nSUMMARY:{summary}"
+                    for i, summary in enumerate(summaries)
+                ]),
+                stderr="",
+            )
+            try:
+                with patch.object(router.subprocess, "run", return_value=good):
+                    events = router.fetch_school()
+            finally:
+                router.SDST_ICAL_URL_FILES = original_files
+
+        self.assertEqual(events, [])
+
     def test_fetch_school_includes_labor_day_district_closure(self):
         with tempfile.TemporaryDirectory() as tmp:
             url_file = Path(tmp) / "district"
