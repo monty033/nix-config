@@ -136,6 +136,69 @@ class SportsValidationTests(unittest.TestCase):
 
         self.assertEqual(urlopen.call_count, 1)
         self.assertIn("status=403", stderr.getvalue())
+
+    def test_phillies_postseason_requests_and_stable_uid(self):
+        requested = []
+        game = {"dates": [{"date": "2026-10-10", "games": [{
+            "gamePk": 900001, "gameType": "D", "gameDate": "2026-10-10T22:38:00Z",
+            "teams": {"away": {"team": {"name": "Philadelphia Phillies"}},
+                      "home": {"team": {"name": "Los Angeles Dodgers"}}},
+            "venue": {"name": "Dodger Stadium"}}]}]}
+
+        def respond(url, *args, **kwargs):
+            requested.append(url)
+            return game if "startDate=2026-10-01" in url else {"dates": []}
+
+        with mock.patch.object(generate, "fetch_json", side_effect=respond):
+            events = generate.fetch_phillies(2026)
+        self.assertTrue(all("gameType=R,F,D,L,W" in url for url in requested))
+        self.assertTrue(any("endDate=2026-11-10" in url for url in requested))
+        self.assertEqual(sum(event.count("UID:") for event in events), 1)
+        self.assertIn("UID:mlb-2026-900001@philly-sports-cal", events[0])
+
+    def test_phillies_regular_uid_remains_legacy(self):
+        game = {"dates": [{"date": "2026-07-04", "games": [{
+            "gamePk": 500123, "gameType": "R", "gameDate": "2026-07-04T16:05:00Z",
+            "teams": {"away": {"team": {"name": "Philadelphia Phillies"}},
+                      "home": {"team": {"name": "New York Mets"}}}}]}]}
+        with mock.patch.object(generate, "fetch_json", side_effect=[game] + [{"dates": []}] * 7):
+            events = generate.fetch_phillies(2026)
+        self.assertIn("UID:mlb-2026-2026-07-04-500123-philadelphia-phillies-vs-new-york-mets@philly-sports-cal", events[0])
+
+    def test_eagles_merges_postseason_by_event_id_and_labels_correctly(self):
+        regular = {"events": [{"id": "1", "date": "2025-09-07T00:15Z", "name": "Eagles game",
+                               "seasonType": {"type": 2}}]}
+        playoffs = {"events": [{"id": "1", "date": "2025-09-07T00:15Z", "name": "Eagles game",
+                                "seasonType": {"type": 2}},
+                    {"id": "2", "date": "2025-01-12T21:30Z", "name": "Playoff game",
+                     "seasonType": {"type": 3}}]}
+        with mock.patch.object(generate, "fetch_json", side_effect=[regular, playoffs]) as fetch:
+            events = generate.fetch_eagles(2024)
+        self.assertIn("seasontype=3", fetch.call_args_list[1].args[0])
+        self.assertEqual(len(events), 2)
+        self.assertTrue(any("UID:nfl-eagles-2024-1@philly-sports-cal" in e for e in events))
+        self.assertTrue(any("UID:nfl-eagles-2024-2@philly-sports-cal" in e and "SUMMARY:[Playoffs]" in e for e in events))
+
+    def test_eagles_string_season_type_values_keep_postseason_label(self):
+        postseason = {"events": [{"id": "2", "date": "2025-01-12T21:30Z", "name": "Playoff game",
+                                 "seasonType": {"type": "3"}}]}
+        with mock.patch.object(generate, "fetch_json", side_effect=[{"events": []}, postseason]):
+            events = generate.fetch_eagles(2024)
+        self.assertIn("SUMMARY:[Playoffs] Playoff game", events[0])
+
+    def test_flyers_playoff_uid_is_provider_stable_and_regular_uid_legacy(self):
+        def weekly(game_type, game_id, date):
+            return {"gameWeek": [{"date": date, "games": [{"id": game_id, "gameType": game_type,
+                "startTimeUTC": date + "T23:00:00Z", "venue": {"default": "Arena"},
+                "homeTeam": {"placeName": {"default": "Philadelphia"}, "commonName": {"default": "Flyers"}},
+                "awayTeam": {"placeName": {"default": "New York"}, "commonName": {"default": "Rangers"}}}]}]}
+        empty = {"gameWeek": []}
+        with mock.patch.object(generate, "fetch_json", side_effect=[weekly(3, 700001, "2027-05-01")] + [empty]*60):
+            playoff = generate.fetch_flyers(2026)[0]
+        self.assertIn("UID:nhl-2026-27-700001@philly-sports-cal", playoff)
+        with mock.patch.object(generate, "fetch_json", side_effect=[weekly(2, 700002, "2026-11-15")] + [empty]*60):
+            regular = generate.fetch_flyers(2026)[0]
+        self.assertIn("UID:nhl-2026-27-2026-11-15-new-york-rangers-vs-philadelphia-flyers@philly-sports-cal", regular)
     def test_deploy_tracks_remote_swap_state_for_rollback(self):
         deploy = (SCRIPT_DIR / "deploy.sh").read_text()
         self.assertIn("had_previous=0", deploy)

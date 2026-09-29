@@ -175,8 +175,11 @@ def fetch_flyers(season_year=None):
             dt = datetime.fromisoformat(g["start_utc"].replace("Z", "+00:00"))
         except ValueError as error:
             raise RuntimeError(f"Flyers game {g.get('id', 'unknown')} has invalid start time") from error
-        away_s, home_s = slug(g["away"]), slug(g["home"])
-        uid = f"nhl-{season_year}-{str(season_year + 1)[-2:]}-{g['local_date']}-{away_s}-vs-{home_s}@philly-sports-cal"
+        if g["game_type"] == 3:
+            uid = f"nhl-{season_year}-{str(season_year + 1)[-2:]}-{g['id']}@philly-sports-cal"
+        else:
+            away_s, home_s = slug(g["away"]), slug(g["home"])
+            uid = f"nhl-{season_year}-{str(season_year + 1)[-2:]}-{g['local_date']}-{away_s}-vs-{home_s}@philly-sports-cal"
         summary = f"{g['away']} @ {g['home']}"
         description = f"NHL {season_year}-{str(season_year + 1)[-2:]}\\n{g['away']} @ {g['home']}\\n{g['venue']}"
         events.append(make_vevent(uid, summary, fmt_utc(dt), fmt_utc(dt + timedelta(hours=3)),
@@ -191,6 +194,7 @@ def fetch_flyers(season_year=None):
 def fetch_phillies(season_year=None):
     print("Phillies: fetching from statsapi.mlb.com...")
     season_year = season_year or active_mlb_season_year()
+    game_types = "R,F,D,L,W"
     months = [
         (f"{season_year}-03-20", f"{season_year}-03-31"),
         (f"{season_year}-04-01", f"{season_year}-04-30"),
@@ -199,16 +203,16 @@ def fetch_phillies(season_year=None):
         (f"{season_year}-07-01", f"{season_year}-07-31"),
         (f"{season_year}-08-01", f"{season_year}-08-31"),
         (f"{season_year}-09-01", f"{season_year}-09-30"),
-        (f"{season_year}-10-01", f"{season_year}-10-05"),
+        (f"{season_year}-10-01", f"{season_year}-11-10"),
     ]
 
     all_games = []
     failures = []
     for start, end in months:
         url = (f"https://statsapi.mlb.com/api/v1/schedule"
-               f"?sportId=1&season={season_year}&gameType=R"
+               f"?sportId=1&season={season_year}&gameType={game_types}"
                f"&startDate={start}&endDate={end}"
-               f"&fields=dates,date,games,gamePk,gameDate,teams,away,home,team,name,venue")
+               f"&fields=dates,date,games,gamePk,gameDate,gameType,teams,away,home,team,name,venue")
         try:
             data = fetch_json(url)
             for date_obj in data.get("dates", []):
@@ -221,6 +225,7 @@ def fetch_phillies(season_year=None):
                         raise ValueError("Phillies game missing gamePk")
                     all_games.append({
                         "game_pk": g["gamePk"],
+                        "game_type": g.get("gameType", "R"),
                         "date": date_obj["date"],
                         "dt_str": g["gameDate"],
                         "away": away,
@@ -242,8 +247,11 @@ def fetch_phillies(season_year=None):
             dt = datetime.fromisoformat(g["dt_str"].replace("Z", "+00:00"))
         except ValueError as error:
             raise RuntimeError(f"Phillies game on {g.get('date', 'unknown')} has invalid start time") from error
-        away_s, home_s = slug(g["away"]), slug(g["home"])
-        uid = f"mlb-{season_year}-{g['date']}-{g['game_pk']}-{away_s}-vs-{home_s}@philly-sports-cal"
+        if g["game_type"] != "R":
+            uid = f"mlb-{season_year}-{g['game_pk']}@philly-sports-cal"
+        else:
+            away_s, home_s = slug(g["away"]), slug(g["home"])
+            uid = f"mlb-{season_year}-{g['date']}-{g['game_pk']}-{away_s}-vs-{home_s}@philly-sports-cal"
         if uid in seen:
             continue
         seen.add(uid)
@@ -261,12 +269,23 @@ def fetch_phillies(season_year=None):
 def fetch_eagles(season_year=None):
     print("Eagles: fetching from ESPN API...")
     season_year = season_year or active_nfl_season_year()
-    data = fetch_json(
-        f"https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/teams/phi/schedule?season={season_year}&region=us&lang=en&contentorigin=espn"
+    base_url = (
+        "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/"
+        f"teams/phi/schedule?season={season_year}&region=us&lang=en&contentorigin=espn"
     )
+    raw_events = []
+    seen_ids = set()
+    for url in (base_url, f"{base_url}&seasontype=3"):
+        data = fetch_json(url)
+        for event in data.get("events", []):
+            event_id = event.get("id")
+            if event_id in seen_ids:
+                continue
+            seen_ids.add(event_id)
+            raw_events.append(event)
 
     events = []
-    for event in data.get("events", []):
+    for event in raw_events:
         try:
             dt_str = event.get("date", "")
             if not dt_str or not event.get("id"):
@@ -283,11 +302,14 @@ def fetch_eagles(season_year=None):
 
         # Extract week number if available
         week_num = event.get("week", {}).get("number", "")
-        season_type = event.get("season", {}).get("type", 0)
-        if season_type == 1:  # regular season
+        try:
+            season_type = int(event.get("seasonType", {}).get("type", 0))
+        except (TypeError, ValueError):
+            season_type = 0
+        if season_type == 2:  # regular season
             summary = f"[Wk {week_num}] {name}" if week_num else name
             desc_type = "NFL Regular Season"
-        elif season_type == 2:  # preseason
+        elif season_type == 1:  # preseason
             summary = f"[Pre] {name}"
             desc_type = "NFL Preseason"
         elif season_type == 3:  # postseason
