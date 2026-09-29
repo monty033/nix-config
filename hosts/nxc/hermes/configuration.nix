@@ -508,9 +508,9 @@ in
 
     settings = {
       # Default conversation model is GPT-6 Luna at high reasoning. Claude and
-      # Codex are the only active model families: Luna owns the conversational
-      # front door, Claude Sonnet is the single native delegation target, and
-      # explicit aliases preserve manual model selection when needed.
+      # Codex are the only active model families: Luna owns both the conversational
+      # front door and native delegation; explicit aliases preserve manual model
+      # selection when needed.
       model = {
         default = "gpt-6-luna";
         provider = "openai-codex";
@@ -529,14 +529,17 @@ in
       };
 
       # Native delegate_task controls (Bernie's delegation path).
-      # Claude Sonnet gives delegated work a separate provider and quota pool
-      # from the Luna parent. Session /reasoning --session still wins for an
-      # individual worker.
+      # Workers share the parent's Codex pool; no delegation fallback is configured,
+      # so an outage can stop worker calls even when the main route has fallbacks.
+      # Medium is explicit and overrides parent/session effort for each child.
+      # Serial concurrency and depth 1 keep this pilot bounded and leaf-only.
       delegation = {
-        provider = "claude-subscription-directsdk-experimental";
-        model = "claude-sonnet-5[1m]";
-        max_concurrent_children = 2;
+        provider = "openai-codex";
+        model = "gpt-6-luna";
+        reasoning_effort = "medium";
+        max_concurrent_children = 1;
         max_spawn_depth = 1;
+        max_iterations = 40;
         orchestrator_enabled = true;
       };
 
@@ -714,7 +717,7 @@ in
       # They never receive generic file, shell, browser, or Google tools.
       platform_toolsets.api_server = [ "homeassistant" "health_log" ];
       # claude-subscription-directsdk-experimental provides selectable Claude
-      # Pro routes, native delegated work, and Codex availability fallbacks.
+      # Pro routes and availability fallbacks for Codex routes.
       plugins.enabled = [ "health-log" "hermes-relay" "hermes-mnemosyne" "claude-subscription-directsdk-experimental" ];
 
       # The v0.19 migration is blocked in Nix-managed mode. Declare its schema
