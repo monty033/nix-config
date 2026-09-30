@@ -241,11 +241,8 @@ class FamilyCalendarRouterTests(unittest.TestCase):
 
     def test_fetch_school_includes_new_district_closures(self):
         summaries = [
-            "Indigenous Peoples' Day",
             "Thanksgiving Break - District Closed",
             "District Closed",
-            # Bare holiday name with no closure phrase — whole-title match.
-            "Thanksgiving Break",
         ]
         with tempfile.TemporaryDirectory() as tmp:
             url_file = Path(tmp) / "district"
@@ -257,6 +254,38 @@ class FamilyCalendarRouterTests(unittest.TestCase):
                 returncode=0,
                 stdout=school_ical(*[
                     f"UID:closure-{i}@example.com\nDTSTART:202610{i+1:02d}\n"
+                    f"DTEND:202610{i+2:02d}\nSUMMARY:{summary}"
+                    for i, summary in enumerate(summaries)
+                ]),
+                stderr="",
+            )
+            try:
+                with patch.object(router.subprocess, "run", return_value=good):
+                    events = router.fetch_school()
+            finally:
+                router.SDST_ICAL_URL_FILES = original_files
+
+        self.assertEqual([event["summary"] for event in events], summaries)
+
+    def test_fetch_school_includes_no_school_phrased_closures(self):
+        # The district's second closure phrasing (9 live entries: Election Day,
+        # conference days, PD days). None of these carry "closed" or a holiday
+        # name, so they depend entirely on the "no school" keyword.
+        summaries = [
+            "Election Day - No School for Students/Professional Development Day",
+            "Professional Development/Flex Day/No School for Student",
+            "No School for Students - Professional Development Day",
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            url_file = Path(tmp) / "district"
+            url_file.write_text("https://school.example.invalid/district")
+            original_files = router.SDST_ICAL_URL_FILES
+            router.SDST_ICAL_URL_FILES = [str(url_file)]
+            good = subprocess.CompletedProcess(
+                args=["curl"],
+                returncode=0,
+                stdout=school_ical(*[
+                    f"UID:noschool-{i}@example.com\nDTSTART:202610{i+1:02d}\n"
                     f"DTEND:202610{i+2:02d}\nSUMMARY:{summary}"
                     for i, summary in enumerate(summaries)
                 ]),
@@ -308,10 +337,13 @@ class FamilyCalendarRouterTests(unittest.TestCase):
             "Thanksgiving Board Meeting",
             "Indigenous Students Club",
             "Indigenous Heritage Night",
-            # These two contain the exact added keywords as substrings, so they
-            # fail if a keyword is ever widened back into plain substring match.
+            # Bare holiday names, plus longer titles that merely name the
+            # holiday. The district's own feed treats these as observances,
+            # never as closures, so none may reach the public school feed.
             "Indigenous Peoples' Day Assembly",
             "Thanksgiving Break Planning Meeting",
+            "Indigenous Peoples' Day",
+            "Thanksgiving Break",
         ]
         with tempfile.TemporaryDirectory() as tmp:
             url_file = Path(tmp) / "district"
