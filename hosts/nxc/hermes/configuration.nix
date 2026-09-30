@@ -514,7 +514,10 @@ in
       model = {
         default = "gpt-6-luna";
         provider = "openai-codex";
-        reasoning_effort = "high";
+        # Luna's actual reasoning level is set via agent.reasoning_overrides
+        # below ("gpt-6-luna" = "high"), not here — `model.reasoning_effort`
+        # is not a recognized key in this section's schema and was a dead
+        # setting kept in sync by coincidence with the real override.
         # User-defined model aliases — resolved before catalog lookup.
         # Checked BEFORE built-in short names (sonnet/grok/...).
         # See hermes_cli/model_switch.py::resolve_alias().
