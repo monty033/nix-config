@@ -256,10 +256,19 @@ in
   ];
 
   networking.hostName = "hermes";
-  networking.firewall.allowedTCPPorts = [ 8642 8644 9119 ];
+  # Previously these three ports (API server 8642, webhook 8644, dashboard
+  # 9119) were globally allowed on every interface. Confirmed access
+  # patterns: 8642 (Home Assistant voice endpoint) and 8644 (ha-alert
+  # webhook route) are only ever reached by Home Assistant on the LAN;
+  # the dashboard (9119) is only ever reached over Tailscale (its
+  # dashboard-auth.log shows exclusively Tailscale-range client IPs).
+  # Scope each port to the interface that actually needs it instead of
+  # exposing all three on every network path into the host.
+  #
   # WebUI is bound to the Hermes LAN address; keep its direct listener scoped
   # to the LAN interface for the local-proxy reverse proxy.
-  networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8787 ];
+  networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 8787 ];
+  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 ];
 
   # python3.12 doc build broken in nixpkgs 26.05 (upstream issue #529084)
   documentation.man.enable = false;
