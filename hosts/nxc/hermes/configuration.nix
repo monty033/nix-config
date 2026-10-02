@@ -536,7 +536,7 @@ in
           sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5-5";
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
           luna = "openai-codex/gpt-6-luna";
-          sol = "openai-codex/gpt-6-sol";
+          sol = "openai-codex/gpt-6.1-sol";
         };
       };
 
@@ -594,7 +594,7 @@ in
           ];
           aggregator = {
             provider = "openai-codex";
-            model = "gpt-6-sol";
+            model = "gpt-6.1-sol";
           };
           max_tokens = 4096;
           reference_max_tokens = 600;
@@ -602,7 +602,7 @@ in
         };
         presets.max = {
           reference_models = [
-            { provider = "openai-codex"; model = "gpt-6-sol"; }
+            { provider = "openai-codex"; model = "gpt-6.1-sol"; }
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
           aggregator = {
@@ -704,7 +704,7 @@ in
         # cross-provider availability fallback.
         review = {
           provider = "openai-codex";
-          model = "gpt-6-sol";
+          model = "gpt-6.1-sol";
           reasoning_effort = "xhigh";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-opus-5-5[1m]"; }
@@ -762,7 +762,7 @@ in
           "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "high";
-          # gpt-6-sol is intentionally absent: it inherits the route-level
+          # gpt-6.1-sol is intentionally absent: it inherits the route-level
           # default (medium). Per-session /reasoning still wins for one-offs.
         };
         # Surface-aware verify-before-finish: ON for CLI/TUI/desktop/programmatic
