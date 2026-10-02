@@ -41,7 +41,7 @@
     # Deployment policy remains read-write with bounded single-note delete
     # capability.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=61ba844dd816bdaed0195b3be474d8ac604319a5";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=29b3159292e7ea323ae2b53cf00cf8ccb4aa54b5";
       flake = false;
     };
 
