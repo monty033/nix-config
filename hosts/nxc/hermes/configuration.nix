@@ -533,7 +533,7 @@ in
         # Strings of '<provider>/<model>' are split on '/' into provider + model.
         aliases = {
           haiku = "claude-subscription-directsdk-experimental/claude-haiku-4-5-20251001";
-          sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5[1m]";
+          sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5-5";
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
           luna = "openai-codex/gpt-6-luna";
           sol = "openai-codex/gpt-6-sol";
@@ -572,7 +572,7 @@ in
       # crosses immediately to Claude Sonnet, then Haiku for a lower-cost
       # second attempt within the Claude subscription.
       fallback_providers = [
-        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
+        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
       ];
 
@@ -603,7 +603,7 @@ in
         presets.max = {
           reference_models = [
             { provider = "openai-codex"; model = "gpt-6-sol"; }
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
           aggregator = {
             provider = "claude-subscription-directsdk-experimental";
@@ -657,7 +657,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
         };
 
@@ -684,7 +684,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
         };
 
@@ -695,7 +695,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5[1m]"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
         };
 
@@ -759,7 +759,7 @@ in
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
           "claude-haiku-4-5-20251001" = "medium";
-          "claude-sonnet-5[1m]" = "medium";
+          "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "high";
           # gpt-6-sol is intentionally absent: it inherits the route-level
