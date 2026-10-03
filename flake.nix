@@ -35,13 +35,10 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge Wave 1 merged on 2026-09-26: native
-    # horizontal rules, fenced code blocks, blockquotes, Markdown tables,
-    # and hardened nested/block-capable list boundaries in the write codec.
-    # Deployment policy remains read-write with bounded single-note delete
-    # capability.
+    # Repinned after NookBridge PR #182 merged on 2026-10-03: adds the reserved <root>
+    # notebook context so permission rules can target notes that are in no notebook.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=29b3159292e7ea323ae2b53cf00cf8ccb4aa54b5";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=80cae40947a4fd9bd1c71112191ead9058dfd021";
       flake = false;
     };
 
