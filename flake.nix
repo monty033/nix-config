@@ -35,10 +35,10 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #182 merged on 2026-10-03: adds the reserved <root>
-    # notebook context so permission rules can target notes that are in no notebook.
+    # Repinned after NookBridge PR #183 merged on 2026-10-03: notes.get gains a tolerant
+    # read-only HTML-to-Markdown fallback so Notesnook-authored notes no longer read as unavailable.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=80cae40947a4fd9bd1c71112191ead9058dfd021";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=fa85792362e73650308a89d3ddcd205ce1b81ad1";
       flake = false;
     };
 
