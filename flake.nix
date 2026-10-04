@@ -35,11 +35,11 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #184 merged on 2026-10-03: edited note bodies now mark their
-    # content row unsynced so appends and updates reach other Notesnook clients. (Builds on #183's
-    # tolerant read-only HTML-to-Markdown fallback for notes.get.)
+    # Repinned after NookBridge PR #185 merged on 2026-10-04: note content inputs (create, append,
+    # update) accept up to 4096 bytes, and appended checklists merge into a same-kind trailing list.
+    # (Builds on #184's unsynced-content fix and #183's tolerant read-only notes.get fallback.)
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=14361cdeb5e45b332e212d455d0075de0a852df1";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=108ec40584d8241f8ffac45021ad445af39b1eb9";
       flake = false;
     };
 
