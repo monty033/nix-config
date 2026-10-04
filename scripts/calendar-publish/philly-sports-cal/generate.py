@@ -306,9 +306,11 @@ def fetch_eagles(season_year=None):
             season_type = int(event.get("seasonType", {}).get("type", 0))
         except (TypeError, ValueError):
             season_type = 0
+        desc_week = ""
         if season_type == 2:  # regular season
-            summary = f"[Wk {week_num}] {name}" if week_num else name
+            summary = name
             desc_type = "NFL Regular Season"
+            desc_week = f"Week {week_num}" if week_num else ""
         elif season_type == 1:  # preseason
             summary = f"[Pre] {name}"
             desc_type = "NFL Preseason"
@@ -320,7 +322,11 @@ def fetch_eagles(season_year=None):
             desc_type = "NFL"
 
         uid = f"nfl-eagles-{season_year}-{event.get('id', '')}@philly-sports-cal"
-        description = f"{desc_type}\\n{summary}\\n{venue}"
+        description_lines = [desc_type]
+        if season_type == 2 and desc_week:
+            description_lines.append(desc_week)
+        description_lines.extend([summary, venue])
+        description = "\\n".join(description_lines)
         events.append(make_vevent(uid, summary, fmt_utc(dt), fmt_utc(dt + timedelta(hours=3)),
                                   venue, description, "Football,NFL", "America/New_York"))
 

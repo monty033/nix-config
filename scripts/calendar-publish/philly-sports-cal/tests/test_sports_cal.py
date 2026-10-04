@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import generate  # noqa: E402
 import validate  # noqa: E402
+from icalendar import Calendar  # noqa: E402
 
 
 VALID_ICS = """BEGIN:VCALENDAR
@@ -178,6 +179,32 @@ class SportsValidationTests(unittest.TestCase):
         self.assertEqual(len(events), 2)
         self.assertTrue(any("UID:nfl-eagles-2024-1@philly-sports-cal" in e for e in events))
         self.assertTrue(any("UID:nfl-eagles-2024-2@philly-sports-cal" in e and "SUMMARY:[Playoffs]" in e for e in events))
+
+    def test_eagles_regular_season_title_omits_week_and_description_keeps_it(self):
+        regular = {"events": [{"id": "known-1", "date": "2025-09-07T00:15Z", "name": "Eagles at Cowboys",
+                               "week": {"number": 1}, "seasonType": {"type": 2}}]}
+        with mock.patch.object(generate, "fetch_json", side_effect=[regular, {"events": []}]):
+            event = generate.fetch_eagles(2025)[0]
+
+        self.assertIn("SUMMARY:Eagles at Cowboys", event)
+        self.assertNotIn("SUMMARY:[Wk", event)
+        calendar = Calendar.from_ical(generate.make_calendar([event], "Eagles", "Eagles"))
+        component = next(item for item in calendar.walk() if item.name == "VEVENT")
+        self.assertEqual(
+            str(component["DESCRIPTION"]),
+            "NFL Regular Season\nWeek 1\nEagles at Cowboys\nTBD",
+        )
+        self.assertIn("UID:nfl-eagles-2025-known-1@philly-sports-cal", event)
+
+    def test_eagles_missing_regular_season_week_does_not_add_week_clutter(self):
+        regular = {"events": [{"id": "known-2", "date": "2025-09-14T17:00Z", "name": "Eagles game",
+                               "seasonType": {"type": 2}}]}
+        with mock.patch.object(generate, "fetch_json", side_effect=[regular, {"events": []}]):
+            event = generate.fetch_eagles(2025)[0]
+
+        self.assertIn("SUMMARY:Eagles game", event)
+        self.assertNotIn("Week", event)
+        self.assertNotIn("[Wk", event)
 
     def test_eagles_string_season_type_values_keep_postseason_label(self):
         postseason = {"events": [{"id": "2", "date": "2025-01-12T21:30Z", "name": "Playoff game",
