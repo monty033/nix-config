@@ -35,11 +35,10 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #188 merged: content+listKind updates are supported;
-    # exclude codec-only listKind metadata to avoid empty notesUpdate/sync_failed payloads.
-    # A listKind-only update remains a no-op; this does not convert note content.
+    # Repinned after NookBridge PR #189 merged: success appliedFields excludes codec intent/frozen;
+    # intent-only requests are rejected before mutation (RPC invalid_request / adapter invalid_input).
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=2ea1294027a39c874d4b0ae33668e2e10353ff88";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=033baba9eed08bd1fc4e2b7bd0bbcc0cfb260968";
       flake = false;
     };
 
