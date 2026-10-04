@@ -437,9 +437,8 @@
           config.sops.secrets.minuspod-env.path
         ];
         environment = {
-          LLM_PROVIDER = "openai-compatible";
-          OPENAI_BASE_URL = "https://api.minimax.io/v1";
-          OPENAI_MODEL = "MiniMax-M3";
+          LLM_PROVIDER = "openrouter";
+          OPENAI_MODEL = "qwen/qwen3.7-flash";
           WHISPER_BACKEND = "local";
           WHISPER_MODEL = "tiny";
           WHISPER_DEVICE = "cpu";
