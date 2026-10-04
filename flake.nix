@@ -35,11 +35,11 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #185 merged on 2026-10-04: note content inputs (create, append,
-    # update) accept up to 4096 bytes, and appended checklists merge into a same-kind trailing list.
-    # (Builds on #184's unsynced-content fix and #183's tolerant read-only notes.get fallback.)
+    # Repinned after NookBridge PR #186 merged on 2026-10-04: the append checklist merge now matches
+    # stored lists carrying Notesnook's data-block-id attributes. (Builds on #185's 4096-byte content
+    # cap and #184's unsynced-content fix.)
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=108ec40584d8241f8ffac45021ad445af39b1eb9";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=060c651ae63a932fbdecd9a6a02ee072ba8d5330";
       flake = false;
     };
 
