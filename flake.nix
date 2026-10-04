@@ -35,11 +35,11 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #187 merged on 2026-10-04: notes.update accepts multi-line Markdown
-    # content (tab, LF and CR) at all four validation layers, matching create and append. (Builds on
-    # #186's block-id checklist merge and #185's 4096-byte content cap.)
+    # Repinned after NookBridge PR #188 merged: content+listKind updates are supported;
+    # exclude codec-only listKind metadata to avoid empty notesUpdate/sync_failed payloads.
+    # A listKind-only update remains a no-op; this does not convert note content.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=4abffb7c851a5165e2b40dc251f55f207e68fde1";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=2ea1294027a39c874d4b0ae33668e2e10353ff88";
       flake = false;
     };
 
