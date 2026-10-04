@@ -35,10 +35,9 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #189 merged: success appliedFields excludes codec intent/frozen;
-    # intent-only requests are rejected before mutation (RPC invalid_request / adapter invalid_input).
+    # Repinned after NookBridge PR #190 merged: bounded categorical error reasons reach MCP callers.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=033baba9eed08bd1fc4e2b7bd0bbcc0cfb260968";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=face07d7ccff25671770b90cdde73b259c97cb0d";
       flake = false;
     };
 
