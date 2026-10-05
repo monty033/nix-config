@@ -170,6 +170,14 @@
         upstream = "192.168.86.126:8787";
       };
 
+      # Mercury's HTTPS entry point for the Hermes dashboard. The dashboard
+      # listener is restricted to tailscale0, so keep the proxy upstream on
+      # the Hermes host's Tailscale address rather than its LAN address.
+      "hermes-dashboard.montycasa.net" = {
+        protocol = "http";
+        upstream = "100.81.254.49:9119";
+      };
+
       # Pi-hole admin/API web UIs — Gate 3B exposure. The Caddy host is the
       # only Internet-reachable HTTPS endpoint; it proxies to the LAN-only
       # Pi-hole Web at port 8080 on each instance. Both Pi-holes use the
