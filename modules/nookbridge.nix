@@ -67,6 +67,7 @@ with lib; let
       --property=Environment=HOME=/var/lib/nookbridge \
       --property=Environment=PATH=${pkgs.coreutils}/bin \
       --setenv=NOOKBRIDGE_ENABLE_LIVE_SYNC=1 \
+      --setenv=NOOKBRIDGE_STATE_DIR=/var/lib/nookbridge \
       --property=LoadCredential=nookbridge-db-key:${credentialPath} \
       --property=ProtectSystem=strict \
       --property=ProtectHome=yes \

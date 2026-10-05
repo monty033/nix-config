@@ -35,9 +35,11 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #190 merged: bounded categorical error reasons reach MCP callers.
+    # Repinned after NookBridge PR #191 merged: the read-only sync proof refuses
+    # an implicit state directory instead of passing against an empty store, so
+    # the operator sync wrapper must now name the store explicitly.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=face07d7ccff25671770b90cdde73b259c97cb0d";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=1a53e5b322d9e3762962562af4b03e1345db9910";
       flake = false;
     };
 
@@ -984,6 +986,7 @@
       assert_wrapper_line "  --unit=nookbridge-sync.service \\" ${operatorSync}/bin/nookbridge-sync
       assert_wrapper_line "  --setenv=NOOKBRIDGE_ENABLE_LIVE_AUTH=1 \\" ${operatorProvision}/bin/nookbridge-provision
       assert_wrapper_line "  --setenv=NOOKBRIDGE_ENABLE_LIVE_SYNC=1 \\" ${operatorSync}/bin/nookbridge-sync
+      assert_wrapper_line "  --setenv=NOOKBRIDGE_STATE_DIR=/var/lib/nookbridge \\" ${operatorSync}/bin/nookbridge-sync
       assert_wrapper_line "  ${nookbridgePackage}/bin/nookbridge-provision-cli" ${operatorProvision}/bin/nookbridge-provision
       assert_wrapper_line "  ${nookbridgePackage}/bin/nookbridge-sync-cli" ${operatorSync}/bin/nookbridge-sync
       ! ${pkgs.gnugrep}/bin/grep -Fq -- 'nookbridge-sync-cli' ${operatorProvision}/bin/nookbridge-provision
