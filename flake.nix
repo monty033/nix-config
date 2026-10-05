@@ -35,11 +35,9 @@
 
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
 
-    # Repinned after NookBridge PR #186 merged on 2026-10-04: the append checklist merge now matches
-    # stored lists carrying Notesnook's data-block-id attributes. (Builds on #185's 4096-byte content
-    # cap and #184's unsynced-content fix.)
+    # Repinned after NookBridge PR #190 merged: bounded categorical error reasons reach MCP callers.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=060c651ae63a932fbdecd9a6a02ee072ba8d5330";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=face07d7ccff25671770b90cdde73b259c97cb0d";
       flake = false;
     };
 
