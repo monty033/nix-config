@@ -6,6 +6,10 @@ let
     config.allowUnfree = true;
   };
   nookbridge = pkgs.callPackage ../../../packages/nookbridge.nix { inherit inputs; };
+  opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
+  # Hermes' stable Tailscale IPv4 address (also used by the local-proxy
+  # dashboard upstream).
+  hermesTailscaleIp = "100.81.254.49";
   hermesBasePkgs = import inputs.nixpkgs {
     system = pkgs.stdenv.hostPlatform.system;
     config.allowUnfree = true;
@@ -268,7 +272,8 @@ in
   # WebUI is bound to the Hermes LAN address; keep its direct listener scoped
   # to the LAN interface for the local-proxy reverse proxy.
   networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 8787 ];
-  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 ];
+  # OpenCode v2 server (4096) is likewise reachable only over Tailscale.
+  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 4096 ];
 
   # python3.12 doc build broken in nixpkgs 26.05 (upstream issue #529084)
   documentation.man.enable = false;
@@ -363,6 +368,7 @@ in
   environment.systemPackages = with pkgs; [
     pkgs-unstable.claude-code
     pkgs-unstable.codex
+    opencode-v2
     graphviz
     tmux
     pkgs.jq
@@ -398,6 +404,14 @@ in
     owner = "hermes";
     group = "users";
     mode = "0400";
+  };
+  # Contains OPENCODE_SERVER_PASSWORD=<value>; read by systemd as an
+  # EnvironmentFile, never embedded in Nix or the store.
+  sops.secrets."opencode-server-env" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+    restartUnits = [ "opencode-server.service" ];
   };
   sops.secrets."calendar-proton-url" = {
     owner = "hermes";
@@ -1231,6 +1245,35 @@ in
       Group = "users";
       EnvironmentFile = config.sops.secrets."openclaw-env".path;
       ExecStart = "${config.services.hermes-agent.package}/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --skip-build";
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+  };
+
+  # OpenCode v2 server. Bound to Hermes' Tailscale address only and also
+  # firewalled to tailscale0. Runs as the hermes user so it shares the
+  # workspace and tool credentials with the agent.
+  systemd.services.opencode-server = {
+    description = "OpenCode v2 server (Tailscale only)";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" "sops-install-secrets.service" ];
+    after = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" "sops-install-secrets.service" ];
+    environment = {
+      HOME = "/var/lib/hermes";
+    };
+    serviceConfig = {
+      User = "hermes";
+      Group = "users";
+      WorkingDirectory = "/var/lib/hermes/workspace";
+      EnvironmentFile = config.sops.secrets."opencode-server-env".path;
+      # The bind address only exists once tailscaled is authenticated; wait
+      # for it instead of crash-looping at boot.
+      # Fail closed instead of letting OpenCode silently generate a random password.
+      ExecStartPre = [
+        "${pkgs.runtimeShell} -c 'test -n \"\$OPENCODE_SERVER_PASSWORD\" || { echo \"OpenCode server password is required\" >&2; exit 1; }'"
+        "${pkgs.runtimeShell} -c 'for i in $(seq 1 90); do ${pkgs.iproute2}/bin/ip -4 addr show dev tailscale0 | ${pkgs.gnugrep}/bin/grep -q \"inet ${hermesTailscaleIp}/\" && exit 0; sleep 1; done; echo \"tailscale address ${hermesTailscaleIp} not available\" >&2; exit 1'"
+      ];
+      ExecStart = "${opencode-v2}/bin/opencode serve --hostname ${hermesTailscaleIp} --port 4096";
       Restart = "on-failure";
       RestartSec = 5;
     };

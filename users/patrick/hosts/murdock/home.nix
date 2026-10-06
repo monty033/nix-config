@@ -5,6 +5,22 @@ let
     system = pkgs.stdenv.hostPlatform.system;
     config.allowUnfree = true;
   };
+  opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
+  # Connects the OpenCode TUI to the Hermes server over Tailscale. The
+  # password is read at run time from a sops-managed file, never from Nix.
+  opencode-hermes = pkgs.writeShellScriptBin "opencode-hermes" ''
+    set -eu
+    exec ${pkgs.systemd}/bin/systemd-run --user --same-dir --pty --wait --collect \
+      --property=EnvironmentFile=/run/secrets/opencode-server-env \
+      -- ${pkgs.runtimeShell} -c '
+        if [ -z "''${OPENCODE_SERVER_PASSWORD:-}" ]; then
+          printf "%s\n" "OpenCode server password missing or empty" >&2
+          exit 1
+        fi
+        export OPENCODE_PASSWORD="$OPENCODE_SERVER_PASSWORD"
+        exec "$@"
+      ' opencode-hermes ${opencode-v2}/bin/opencode --server http://hermes.skink-galaxy.ts.net:4096 "$@"
+  '';
 in
 {
   imports = [ ../../common/home.nix ];
@@ -25,7 +41,8 @@ in
     pkgs-unstable.claude-code
     pkgs-unstable.nodejs_22
     pkgs-unstable.codex
-    pkgs-unstable.opencode
+    opencode-v2
+    opencode-hermes
     pkgs-unstable.opencode-desktop
     # pkgs-unstable.freecad
     pkgs-unstable.telegram-desktop
