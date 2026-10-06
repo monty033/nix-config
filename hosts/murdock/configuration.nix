@@ -31,6 +31,13 @@ in
     ../../secrets
   ];
 
+  # Reuse Hermes' encrypted OpenCode environment file for the client wrapper.
+  # SOPS materializes a Murdock-local copy readable only by Patrick.
+  sops.secrets."opencode-server-env" = {
+    owner = "patrick";
+    mode = "0400";
+  };
+
   extra-services.desktop.enable = true;
   extra-services.tailscale.enable = true;
   extra-services.pbs-home-dirs.enable = true;

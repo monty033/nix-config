@@ -34,6 +34,24 @@ Personal NixOS homelab configuration managing 37 flake configurations across Pro
 
 See [`host-states.md`](host-states.md) for the latest recorded operational snapshot. The flake remains authoritative for configured hosts.
 
+## OpenCode v2 on Hermes
+
+Hermes runs the pinned OpenCode v2 package (`2.0.23`) on its Tailscale address,
+port `4096`. On Murdock, run `opencode-hermes` to launch the pinned TUI against
+`http://hermes.skink-galaxy.ts.net:4096`; browser access uses
+`https://opencode.montycasa.net` through Caddy TLS to the Hermes Tailscale
+upstream. The local-proxy boundary is operator-confirmed LAN/Tailscale-only;
+it was not independently live-verified.
+
+The SOPS EnvironmentFile secret `opencode-server-env` must contain a
+non-empty `OPENCODE_SERVER_PASSWORD=...` assignment; keep its value out of Nix
+and the store. Rotating it requires updating that secret; sops-nix restarts
+`opencode-server.service` when the rendered file changes.
+`scripts/update-opencode-v2.sh VERSION` previews the package version and hash
+diff only; it does not edit files. For rollback, revert the package
+version/hash change and rebuild/switch through the normal reviewed deployment
+workflow; do not change proxy or firewall rules as part of an OpenCode rollback.
+
 ## NookBridge settings
 
 NookBridge settings can be declared inline in Nix or supplied as a separate

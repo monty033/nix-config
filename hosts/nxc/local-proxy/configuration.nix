@@ -163,8 +163,7 @@
         upstream = "192.168.86.137:8080";
       };
 
-      # Hermes exposes this listener on its LAN interface; public access
-      # remains through this HTTPS reverse proxy.
+      # Operator-confirmed LAN/Tailscale-only proxy; perimeter not independently live-verified.
       "hermes.montycasa.net" = {
         protocol = "http";
         upstream = "192.168.86.126:8787";
@@ -178,11 +177,18 @@
         upstream = "100.81.254.49:9119";
       };
 
-      # Pi-hole admin/API web UIs — Gate 3B exposure. The Caddy host is the
-      # only Internet-reachable HTTPS endpoint; it proxies to the LAN-only
-      # Pi-hole Web at port 8080 on each instance. Both Pi-holes use the
-      # SOPS-rendered API credential (pihole-api-password) and serve the
-      # same reviewed Nix policy.
+      # OpenCode v2 web UI. The server listens only on Hermes' Tailscale
+      # address, so the upstream is its Tailscale IP, never the LAN address.
+      # OpenCode's own server password stays enforced; Caddy adds only TLS.
+      "opencode.montycasa.net" = {
+        protocol = "http";
+        upstream = "100.81.254.49:4096";
+      };
+
+      # Pi-hole admin/API web UIs — Gate 3B. local-proxy is reachable only
+      # from the LAN and Tailscale; it proxies to LAN-only Pi-hole Web at
+      # port 8080. Both Pi-holes use the SOPS-rendered API credential
+      # (pihole-api-password) and serve the same reviewed Nix policy.
       "pihole1.montycasa.net" = {
         protocol = "http";
         upstream = "192.168.86.101:8080";
