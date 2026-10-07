@@ -6,6 +6,7 @@ let
     config.allowUnfree = true;
   };
   opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
+  opencode-goal-plugin = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-goal-plugin;
   # Connects the OpenCode TUI to the Hermes server over Tailscale. The
   # password is read at run time from a sops-managed file, never from Nix.
   opencode-hermes = pkgs.writeShellScriptBin "opencode-hermes" ''
@@ -42,6 +43,7 @@ in
     pkgs-unstable.nodejs_22
     pkgs-unstable.codex
     opencode-v2
+    opencode-goal-plugin
     opencode-hermes
     pkgs-unstable.opencode-desktop
     # pkgs-unstable.freecad

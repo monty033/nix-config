@@ -7,6 +7,14 @@ let
   };
   nookbridge = pkgs.callPackage ../../../packages/nookbridge.nix { inherit inputs; };
   opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
+  opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
+  opencode-goal-plugin = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-goal-plugin;
+  opencode-server-config = pkgs.writeText "opencode-server-config.json" (builtins.toJSON {
+    plugins = [
+      "${opencode-claude}/lib/node_modules/@openchamber/opencode-claude"
+      "${opencode-goal-plugin}/share/opencode-goal-plugin"
+    ];
+  });
   # Hermes' stable Tailscale IPv4 address (also used by the local-proxy
   # dashboard upstream).
   hermesTailscaleIp = "100.81.254.49";
@@ -1260,7 +1268,9 @@ in
     after = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" "sops-install-secrets.service" ];
     environment = {
       HOME = "/var/lib/hermes";
+      OPENCODE_CONFIG_CONTENT = builtins.readFile opencode-server-config;
     };
+    path = [ pkgs-unstable.claude-code ];
     serviceConfig = {
       User = "hermes";
       Group = "users";

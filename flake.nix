@@ -55,7 +55,11 @@
   };
 
   outputs = inputs@{ self, nixpkgs, nixpkgs-unstable, nixpkgs-2511, home-manager, disko, sops-nix, nix-flatpak, plasma-manager, nix-hermes-agent, hermes-webui, ... }: {
-    packages.x86_64-linux.opencode-v2 = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-v2.nix { };
+    packages.x86_64-linux = {
+      opencode-v2 = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-v2.nix { };
+      opencode-claude = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-claude.nix { };
+      opencode-goal-plugin = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-goal-plugin.nix { };
+    };
 
     ## tesseract ##
     nixosConfigurations.tesseract = nixpkgs.lib.nixosSystem {
