@@ -43,6 +43,8 @@ port `4096`. On Murdock, run `opencode-hermes` to launch the pinned TUI against
 upstream. The local-proxy boundary is operator-confirmed LAN/Tailscale-only;
 it was not independently live-verified.
 
+`opencode-server.service` declaratively loads OpenChamber Claude (`@openchamber/opencode-claude` 1.3.7) and Goal (`opencode-goal-plugin` 1.2.0) from pinned Nix packages via `OPENCODE_CONFIG_CONTENT`. The Goal package is also in Murdock's profile: OpenCode v2 advertises its remote TUI component, and the local matching package makes that component available without a runtime npm fetch. Claude's Agent SDK integration requires the Claude Code CLI on the Hermes service PATH; authentication remains the user's normal Claude CLI state. Review Goal's `verify-cmd` configuration before use: it runs a command to verify goal completion.
+
 The SOPS EnvironmentFile secret `opencode-server-env` must contain a
 non-empty `OPENCODE_SERVER_PASSWORD=...` assignment; keep its value out of Nix
 and the store. Rotating it requires updating that secret; sops-nix restarts
