@@ -59,6 +59,7 @@
       opencode-v2 = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-v2.nix { };
       opencode-claude = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-claude.nix { };
       opencode-goal-plugin = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-goal-plugin.nix { };
+      opencode-api = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-api.nix { };
     };
 
     ## tesseract ##
