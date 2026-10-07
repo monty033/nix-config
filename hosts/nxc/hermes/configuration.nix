@@ -9,6 +9,7 @@ let
   opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
   opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
   opencode-goal-plugin = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-goal-plugin;
+  opencode-api = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-api;
   opencode-server-config = pkgs.writeText "opencode-server-config.json" (builtins.toJSON {
     plugins = [
       "${opencode-claude}/lib/node_modules/@openchamber/opencode-claude"
@@ -377,6 +378,7 @@ in
     pkgs-unstable.claude-code
     pkgs-unstable.codex
     opencode-v2
+    opencode-api
     graphviz
     tmux
     pkgs.jq
