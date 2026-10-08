@@ -567,7 +567,7 @@ in
         # See hermes_cli/model_switch.py::resolve_alias().
         # Strings of '<provider>/<model>' are split on '/' into provider + model.
         aliases = {
-          haiku = "claude-subscription-directsdk-experimental/claude-haiku-4-5-20251001";
+          haiku = "claude-subscription-directsdk-experimental/claude-haiku-5-5";
           sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5-5";
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
           luna = "openai-codex/gpt-6-luna";
