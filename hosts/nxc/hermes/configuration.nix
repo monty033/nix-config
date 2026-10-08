@@ -553,8 +553,8 @@ in
 
     settings = {
       # Default conversation model is Claude Haiku 5.5 through the subscription
-      # DirectSDK route, on a 80k compaction threshold (see compression below) to
-      # keep per-session context inside the Haiku cost range. GPT-6 Luna remains
+      # DirectSDK route. Its compaction trigger is 80k via compression.model_thresholds
+      # (see compression below), and other models keep the global 300k cap. GPT-6 Luna remains
       # the native delegation model and an explicit alias (luna); explicit
       # aliases preserve manual model selection when needed.
       model = {
@@ -606,12 +606,11 @@ in
       };
 
       # Fallbacks are availability routes, not quality routing. Claude is the
-      # default route, so the first two entries stay on the same subscription
+      # default route, so the first entry (Sonnet) stays on the same subscription
       # provider. The last entry is Codex (GPT-6 Luna), an independent provider,
       # so a Claude-subscription outage still has a non-Claude backup.
       fallback_providers = [
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
-        { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
         { provider = "openai-codex"; model = "gpt-6-luna"; }
       ];
 
@@ -821,11 +820,15 @@ in
         # across the rewrite, so gateway routing, /goal, and session_search
         # stay coherent across long topic sessions.
         threshold = 0.85;
-        # Deliberately cap live conversation context at 80k even when a model
-        # advertises a larger window: huge prefixes burn subscription allowance,
-        # weaken focus, and are less cache-friendly than a compacted stable prefix.
-        # Chosen for the Haiku-default trial; revisit after measuring real usage.
-        threshold_tokens = 80000;
+        # Global cap stays at 300k for every model: huge prefixes burn subscription
+        # allowance, weaken focus, and are less cache-friendly than a compacted
+        # stable prefix. Haiku 5.5 is the one exception: model_thresholds below
+        # triggers it at 8% of its 1M window (80k). Luna, Sol, Sonnet, and Opus are
+        # unaffected. Revisit after measuring real Haiku usage.
+        threshold_tokens = 300000;
+        model_thresholds = {
+          "claude-subscription-directsdk-experimental:claude-haiku-5-5" = 0.08;
+        };
         target_ratio = 0.20;
         protect_last_n = 120;
         protect_first_n = 3;
