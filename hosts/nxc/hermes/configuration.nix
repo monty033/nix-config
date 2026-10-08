@@ -5,6 +5,16 @@ let
     system = pkgs.stdenv.hostPlatform.system;
     config.allowUnfree = true;
   };
+  # The DirectSDK plugin discovers the subscription model catalog through
+  # Claude Code at runtime and requires CLI 2.1.293 or newer. Keep this newer
+  # vendor-binary CLI isolated to Hermes, using nixpkgs' manifest override.
+  claudeCodeForHermes = let
+    package = pkgs-unstable.claude-code.override {
+      manifest = builtins.fromJSON (builtins.readFile ../../../packages/claude-code-2.1.293-manifest.json);
+    };
+  in
+    assert lib.versionAtLeast package.version "2.1.293";
+    package;
   nookbridge = pkgs.callPackage ../../../packages/nookbridge.nix { inherit inputs; };
   opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
   opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
@@ -159,22 +169,23 @@ let
   '';
   # Claude Subscription DirectSDK (experimental) — routes Hermes inference
   # through the official Claude Code CLI so a Claude Pro/Max subscription can
-  # serve as a conversation model. Pinned by COMMIT, not version: upstream
-  # 0.3.0 spans materially different prompt-cache implementations, so the tag
-  # alone is not a safe pin.
+  # serve as a conversation model. The plugin now discovers available models
+  # live through Claude Code and requires CLI >= 2.1.293. Pinned by COMMIT, not
+  # version: upstream 0.3.0 spans materially different prompt-cache
+  # implementations, so the tag alone is not a safe pin.
   #
   # The plugin declares no Python dependencies and Hermes' plugin loader
   # imports the directory directly (verified by running it from a plugin
   # directory with no PYTHONPATH changes), so no extraPythonPackages entry is
-  # needed. Runtime prerequisites are the `claude` CLI — provided above as
-  # pkgs-unstable.claude-code — and a logged-in subscription in the hermes
-  # user's ~/.claude. It is enabled only as an ADDITIONAL selectable route;
-  # model.default/model.provider stay on openai-codex.
+  # needed. Runtime prerequisite is the `claude` CLI — provided above as
+  # claudeCodeForHermes — alongside the hermes user's existing subscription.
+  # It is enabled only as an ADDITIONAL selectable route; model.default and
+  # model.provider stay unchanged.
   claudeSubscriptionDirectsdkSrc = pkgs.fetchFromGitHub {
     owner = "NousResearch";
     repo = "hermes-plugin-claude-subscription-directsdk";
-    rev = "602393b6d3ea148bc618cd23da1a13fa332e1433";
-    hash = "sha256-Ll0bmt+UJONvDPrfFTECVvlut/MgQIBmInYgtjYAoC0=";
+    rev = "4bc79c78031d1a042b5d8a7314ceea283db5c5e2";
+    hash = "sha256-xrCfPlPKG5qYYFx7YMTo8Gp+bERcrSFvFZBUHgiM44M=";
   };
   claudeSubscriptionDirectsdkPlugin =
     pkgs.runCommand "claude-subscription-directsdk-hermes-plugin" { } ''
@@ -341,7 +352,7 @@ in
   # both the vendor CLI on PATH (the subscription plugin resolves its transport
   # with a PATH lookup) and a restart when the plugin set changes, or its model
   # list would go stale and report the provider unavailable.
-  systemd.services.hermes-webui.path = [ pkgs-unstable.claude-code ];
+  systemd.services.hermes-webui.path = [ claudeCodeForHermes ];
   systemd.services.hermes-webui.restartTriggers =
     [ config.services.hermes-agent.package ]
     ++ config.services.hermes-agent.extraPlugins;
@@ -375,7 +386,7 @@ in
   };
 
   environment.systemPackages = with pkgs; [
-    pkgs-unstable.claude-code
+    claudeCodeForHermes
     pkgs-unstable.codex
     opencode-v2
     opencode-api
@@ -533,7 +544,7 @@ in
     #
     # The same applies to the discovery-time provider check the dashboard
     # performs (see systemd.services.hermes-dashboard.path below).
-    extraPackages = [ pkgs-unstable.claude-code ];
+    extraPackages = [ claudeCodeForHermes ];
     extraPythonPackages = [
       mnemosyneMemory
       mnemosyneHermes
@@ -1245,7 +1256,7 @@ in
     # extraPlugins restart trigger), and the subscription model-provider plugin
     # resolves its transport by looking up the vendor CLI on PATH. Without this
     # the dashboard's provider discovery cannot see the CLI.
-    path = [ pkgs-unstable.claude-code ];
+    path = [ claudeCodeForHermes ];
     environment = {
       HOME = "/var/lib/hermes";
       HERMES_HOME = "/var/lib/hermes/.hermes";
@@ -1272,7 +1283,7 @@ in
       HOME = "/var/lib/hermes";
       OPENCODE_CONFIG_CONTENT = builtins.readFile opencode-server-config;
     };
-    path = [ pkgs-unstable.claude-code ];
+    path = [ claudeCodeForHermes ];
     serviceConfig = {
       User = "hermes";
       Group = "users";
