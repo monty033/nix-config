@@ -1226,6 +1226,37 @@ in
       fi
     '';
 
+  # One-time cleanup of a stale key. The upstream hermes-config-merge only
+  # adds and overwrites keys, so removing a Nix-owned entry needs an explicit
+  # step after the merge. This removes only
+  # agent.reasoning_overrides.claude-haiku-4-5-20251001, from #407's era, and
+  # is a no-op once the key is gone. Remove this block after one successful
+  # rebuild has verified the key is absent.
+  system.activationScripts.hermes-prune-stale-haiku45-override =
+    lib.stringAfter [ "hermes-agent-setup" ] ''
+      hermes_cfg=/var/lib/hermes/.hermes/config.yaml
+      if [ -f "$hermes_cfg" ]; then
+        # Non-fatal: a failure here warns and never blocks activation.
+        ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -c '
+import sys, yaml
+from pathlib import Path
+p = Path(sys.argv[1])
+try:
+    data = yaml.safe_load(p.read_text())
+    if not isinstance(data, dict):
+        raise SystemExit(0)
+    agent = data.get("agent")
+    overrides = agent.get("reasoning_overrides") if isinstance(agent, dict) else None
+    if isinstance(overrides, dict) and "claude-haiku-4-5-20251001" in overrides:
+        del overrides["claude-haiku-4-5-20251001"]
+        p.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+        print("pruned stale claude-haiku-4-5-20251001 reasoning override")
+except Exception as e:
+    print("hermes-prune-stale-haiku45-override: skipped: " + type(e).__name__, file=sys.stderr)
+' "$hermes_cfg" || echo "hermes-prune-stale-haiku45-override: warning, continuing" >&2 || true
+      fi
+    '';
+
   users.users.hermes = {
     linger = true;
     extraGroups = [ "nookbridge-clients" "nookbridge-operators" ];
