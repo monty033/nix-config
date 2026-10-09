@@ -627,7 +627,7 @@ in
         default_preset = "standard";
         presets.standard = {
           reference_models = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
             { provider = "openai-codex"; model = "gpt-6-luna"; }
           ];
           aggregator = {
@@ -668,7 +668,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -677,7 +677,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -686,7 +686,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -704,7 +704,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -713,7 +713,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -798,7 +798,6 @@ in
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
           "claude-haiku-5-5" = "medium";
-          "claude-haiku-4-5-20251001" = "medium";
           "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "high";
