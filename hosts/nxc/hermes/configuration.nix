@@ -293,7 +293,7 @@ in
   # to the LAN interface for the local-proxy reverse proxy.
   networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 8787 ];
   # OpenCode v2 server (4096) is likewise reachable only over Tailscale.
-  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 4096 ];
+  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 4096 9130 ];
 
   # python3.12 doc build broken in nixpkgs 26.05 (upstream issue #529084)
   documentation.man.enable = false;
@@ -1042,6 +1042,7 @@ in
     "R /var/lib/hermes/.local/state/bernie-delegation"
     "d /var/lib/hermes/.cache 0700 hermes users -"
     "d /var/lib/hermes/.hermes/mnemosyne 0750 hermes users -"
+    "d /var/lib/hermes/nookbridge-dash 0750 hermes users -"
     "d /var/lib/hermes/.hermes/plugins 0750 hermes users -"
     # The memory provider loader resolves providers by this directory name;
     # expose the Nix-built plugin at the canonical `mnemosyne` path instead of
@@ -1337,6 +1338,41 @@ except Exception as e:
         "${pkgs.runtimeShell} -c 'for i in $(seq 1 90); do ${pkgs.iproute2}/bin/ip -4 addr show dev tailscale0 | ${pkgs.gnugrep}/bin/grep -q \"inet ${hermesTailscaleIp}/\" && exit 0; sleep 1; done; echo \"tailscale address ${hermesTailscaleIp} not available\" >&2; exit 1'"
       ];
       ExecStart = "${opencode-v2}/bin/opencode serve --hostname ${hermesTailscaleIp} --port 4096";
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
+  };
+
+  # NookBridge progress dashboard (served as dash.montycasa.net/nookbridge
+  # through local-proxy). Stdlib Python; SQLite is the source of truth.
+  # Bound only to Hermes' Tailscale address and firewalled to tailscale0.
+  # No login: anyone on the tailnet can edit (accepted by Patrick).
+  # Source runs from the Hermes workspace; the database lives in the
+  # hermes state directory.
+  systemd.services.nookbridge-dash = {
+    description = "NookBridge progress dashboard (Tailscale only)";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" ];
+    after = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" ];
+    serviceConfig = {
+      User = "hermes";
+      Group = "users";
+      # SQLite creates the DB and sidecar files with this umask: owner-only.
+      UMask = "0077";
+      WorkingDirectory = "/var/lib/hermes/workspace/nookbridge-dash";
+      # The bind address only exists once tailscaled is authenticated; wait
+      # for it instead of crash-looping at boot. Never falls back to 0.0.0.0.
+      ExecStartPre = [
+        "${pkgs.writeShellScript "nookbridge-dash-wait-tailscale" ''
+          for i in $(seq 1 90); do
+            ${pkgs.iproute2}/bin/ip -4 addr show dev tailscale0 | ${pkgs.gnugrep}/bin/grep -qF "inet ${hermesTailscaleIp}/" && exit 0
+            sleep 1
+          done
+          echo "tailscale address ${hermesTailscaleIp} not available" >&2
+          exit 1
+        ''}"
+      ];
+      ExecStart = "${pkgs.python3}/bin/python3 /var/lib/hermes/workspace/nookbridge-dash/app/server.py --bind ${hermesTailscaleIp} --port 9130 --db /var/lib/hermes/nookbridge-dash/dash.db --host dash.montycasa.net";
       Restart = "on-failure";
       RestartSec = 5;
     };
