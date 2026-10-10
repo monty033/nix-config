@@ -185,6 +185,15 @@
         upstream = "100.81.254.49:4096";
       };
 
+      # NookBridge progress dashboard. The app serves /nookbridge itself
+      # (Caddy only proxies the hostname). Upstream is the Hermes host's
+      # Tailscale address; the listener is restricted to tailscale0.
+      # No app login: tailnet membership is the only gate.
+      "dash.montycasa.net" = {
+        protocol = "http";
+        upstream = "100.81.254.49:9130";
+      };
+
       # Pi-hole admin/API web UIs — Gate 3B. local-proxy is reachable only
       # from the LAN and Tailscale; it proxies to LAN-only Pi-hole Web at
       # port 8080. Both Pi-holes use the SOPS-rendered API credential
