@@ -163,12 +163,6 @@
         upstream = "192.168.86.137:8080";
       };
 
-      # Operator-confirmed LAN/Tailscale-only proxy; perimeter not independently live-verified.
-      "hermes.montycasa.net" = {
-        protocol = "http";
-        upstream = "192.168.86.126:8787";
-      };
-
       # Mercury's HTTPS entry point for the Hermes dashboard. The dashboard
       # listener is restricted to tailscale0, so keep the proxy upstream on
       # the Hermes host's Tailscale address rather than its LAN address.
