@@ -366,7 +366,7 @@ in
     vaults.MontyVault.path = "/var/lib/hermes/vault/MontyVault";
     # `unsupported` is required for .ics / .base / .canvas and other
     # extensions outside Obsidian's default allowlist. Without it, files
-    # like tasknotes-calendar.ics are silently dropped before upload even
+    # like .ics or .base files are silently dropped before upload even
     # when the phone's "Sync all other types" toggle is on.
     fileTypes.MontyVault = [ "image" "audio" "pdf" "video" "unsupported" ];
   };
@@ -1059,55 +1059,6 @@ in
     "z /var/lib/hermes/.hermes/mnemosyne/data/shared/mnemosyne.db-shm 0600 hermes users -"
   ];
 
-
-  systemd.services.tasknotes-calendar-publish = {
-    description = "Publish the validated TaskNotes calendar to Bifrost";
-    wants = [ "network-online.target" ];
-    after = [ "network-online.target" "obsidian-headless-MontyVault.service" ];
-    environment = {
-      HOME = "/var/lib/hermes";
-      HERMES_HOME = "/var/lib/hermes/.hermes";
-    };
-    serviceConfig = {
-      Type = "oneshot";
-      User = "hermes";
-      Group = "users";
-      WorkingDirectory = "/var/lib/hermes";
-      # The publisher is maintained in Hermes Library, not nix-config. Fail
-      # clearly if the library deployment is missing rather than reporting a
-      # misleading Python/import failure.
-      ExecStartPre = [
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/publish_tasknotes_calendar.py"
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/generate_tasknotes_calendar.py"
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/normalize_tasknotes_calendar.py"
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/validate_ics.py"
-      ];
-      ExecStart = "${hermesPython}/bin/python3 /var/lib/hermes/.hermes/scripts/calendars/publish_tasknotes_calendar.py";
-      TimeoutStartSec = 120;
-    };
-  };
-
-  systemd.paths.tasknotes-calendar-publish = {
-    wantedBy = [ "multi-user.target" ];
-    pathConfig = {
-      PathChanged = [
-        "/var/lib/hermes/vault/MontyVault/TaskNotes"
-        "/var/lib/hermes/vault/MontyVault/TaskNotes/Tasks"
-        "/var/lib/hermes/vault/MontyVault/TaskNotes/Archive"
-      ];
-      Unit = "tasknotes-calendar-publish.service";
-    };
-  };
-
-  systemd.timers.tasknotes-calendar-publish-fallback = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "5min";
-      OnUnitActiveSec = "15min";
-      Persistent = true;
-      Unit = "tasknotes-calendar-publish.service";
-    };
-  };
 
   # Nix-managed calendar publishers. The legacy Hermes family job and sports
   # service remain installed as manual rollback paths, but are no longer
