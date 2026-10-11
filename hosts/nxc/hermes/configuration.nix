@@ -927,7 +927,7 @@ in
                   { name = "Hermes";           skill = "topic-hermes";          thread_id = 87624; }
                   { name = "Health & Fitness"; skill = "topic-health-fitness";  thread_id = 92608; }
                   { name = "Homelab";          skill = "topic-homelab";         thread_id = 87193; }
-                  { name = "Tasks";            skill = "topic-tasks";           thread_id = 87814; }
+                  { name = "Tasks";            skill = "topic-pm";              thread_id = 87814; }
                   { name = "Briefing";         skill = "topic-briefing";        thread_id = 90466; }
                   { name = "General";          skill = "topic-general";         thread_id = 87664; }
                   { name = "CHOP";             skill = "topic-chop";            thread_id = 88598; }
