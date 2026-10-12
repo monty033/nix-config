@@ -221,6 +221,30 @@ let
     export FLOCK=${pkgs.util-linux}/bin/flock
     exec ${pkgs.bash}/bin/bash ${sportsCalendarSource}/deploy.sh
   '';
+  # Hermes Desktop on Murdock authenticates to this dashboard with a dedicated
+  # session token. The unit reads the raw one-line SOPS file at start time and
+  # exports it only into the dashboard process environment, so the value never
+  # reaches the Nix store or a command line. Fail closed if it is unreadable
+  # or empty, rather than serving with a random per-start token.
+  hermesDashboardSessionTokenFile = config.sops.secrets."hermes-desktop-session-token".path;
+  hermes-dashboard-launch = pkgs.writeShellScript "hermes-dashboard-launch" ''
+    set -eu
+
+    token_file=${lib.escapeShellArg hermesDashboardSessionTokenFile}
+    if [ ! -r "$token_file" ]; then
+      echo "hermes-dashboard: cannot read the session token file '$token_file'. The unit stops." >&2
+      exit 1
+    fi
+
+    HERMES_DASHBOARD_SESSION_TOKEN="$(${pkgs.coreutils}/bin/tr -d '\r\n' < "$token_file")"
+    if [ -z "$HERMES_DASHBOARD_SESSION_TOKEN" ]; then
+      echo "hermes-dashboard: the session token file '$token_file' is empty. The unit stops." >&2
+      exit 1
+    fi
+    export HERMES_DASHBOARD_SESSION_TOKEN
+
+    exec ${config.services.hermes-agent.package}/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --skip-build
+  '';
   forgejo-credential-helper = pkgs.writeShellScript "forgejo-credential-helper" ''
     host=""
     protocol=""
@@ -400,6 +424,14 @@ in
     owner = "hermes";
     group = "users";
     mode = "0400";
+  };
+  # Raw one-line session token shared with Hermes Desktop on Murdock. The
+  # dashboard launcher reads it at start time; restart on rotation.
+  sops.secrets."hermes-desktop-session-token" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+    restartUnits = [ "hermes-dashboard.service" ];
   };
   sops.secrets."forgejo-token" = {
     owner = "hermes";
@@ -1209,7 +1241,8 @@ except Exception as e:
 
   systemd.services.hermes-dashboard = {
     wantedBy = [ "multi-user.target" ];
-    after = [ "hermes-agent.service" ];
+    wants = [ "sops-install-secrets.service" ];
+    after = [ "hermes-agent.service" "sops-install-secrets.service" ];
     # The dashboard loads the same plugin set as the gateway (it shares the
     # extraPlugins restart trigger), and the subscription model-provider plugin
     # resolves its transport by looking up the vendor CLI on PATH. Without this
@@ -1223,7 +1256,7 @@ except Exception as e:
       User = "hermes";
       Group = "users";
       EnvironmentFile = config.sops.secrets."openclaw-env".path;
-      ExecStart = "${config.services.hermes-agent.package}/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --skip-build";
+      ExecStart = "${hermes-dashboard-launch}";
       Restart = "on-failure";
       RestartSec = 5;
     };
