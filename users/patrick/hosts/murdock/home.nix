@@ -22,6 +22,49 @@ let
         exec "$@"
       ' opencode-hermes ${opencode-v2}/bin/opencode --server http://hermes.skink-galaxy.ts.net:4096 "$@"
   '';
+  # Hermes Desktop as a remote-only client of the dashboard on the Hermes host.
+  # This overrides the pinned package instead of enabling programs.hermes-agent
+  # or services.hermes-agent, so Murdock runs no local backend and ships exactly
+  # one launcher and desktop entry. The package's own `extraRun` hook exists for
+  # this: the token is read at launch from the sops-managed file, never passed
+  # through `--set` (which would write it to the Nix store), an argument, or a
+  # log. The launcher stops rather than starting a local backend on failure.
+  hermesDesktopTokenFile = "/run/secrets/hermes-desktop-session-token";
+  # The pinned v2026.9.24 desktop package has a stale fixed hash for this
+  # versioned Electron headers URL. Repackage the matching headers already
+  # pinned by nixpkgs, preserving the archive root expected by upstream.
+  electronHeadersArchive = pkgs-unstable.runCommandLocal "electron-${pkgs-unstable.electron.version}-nodedir-headers.tar.gz" { } ''
+    set -euo pipefail
+    mkdir -p node_headers
+    cp -a ${pkgs-unstable.electron.headers}/. node_headers/
+    tar --sort=name --mtime='@1' --owner=0 --group=0 --numeric-owner -cf - node_headers | ${pkgs-unstable.gzip}/bin/gzip -n > "$out"
+  '';
+  hermesDesktopBuildPkgs = pkgs-unstable // {
+    fetchurl = args:
+      if (args.url or null) == "https://artifacts.electronjs.org/headers/dist/v${pkgs-unstable.electron.version}/node-v${pkgs-unstable.electron.version}-headers.tar.gz"
+        && (args.sha256 or null) == "sha256-f8bSbLRmtbP93CJAvEBs+sHWDZ1xP2bcpLhC1EnOmZU="
+      then electronHeadersArchive
+      else pkgs-unstable.fetchurl args;
+  };
+  hermes-desktop-remote = inputs.nix-hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop.override {
+    pkgs = hermesDesktopBuildPkgs;
+    electron = pkgs-unstable.electron;
+    extraEnv.HERMES_DESKTOP_REMOTE_URL = "http://hermes.skink-galaxy.ts.net:9119";
+    extraRun = [
+      ''
+        if [ ! -r ${lib.escapeShellArg hermesDesktopTokenFile} ]; then
+          echo "hermes-desktop: cannot read the session token at ${hermesDesktopTokenFile}." >&2
+          exit 1
+        fi
+        HERMES_DESKTOP_REMOTE_TOKEN="$(${pkgs.coreutils}/bin/tr -d '\r\n' < ${lib.escapeShellArg hermesDesktopTokenFile})"
+        if [ -z "$HERMES_DESKTOP_REMOTE_TOKEN" ]; then
+          echo "hermes-desktop: the session token at ${hermesDesktopTokenFile} is empty." >&2
+          exit 1
+        fi
+        export HERMES_DESKTOP_REMOTE_TOKEN
+      ''
+    ];
+  };
 in
 {
   imports = [ ../../common/home.nix ];
@@ -45,6 +88,7 @@ in
     opencode-v2
     opencode-goal-plugin
     opencode-hermes
+    hermes-desktop-remote
     pkgs-unstable.opencode-desktop
     # pkgs-unstable.freecad
     pkgs-unstable.telegram-desktop
