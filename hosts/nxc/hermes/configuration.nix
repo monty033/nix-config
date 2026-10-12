@@ -551,7 +551,7 @@ in
 
     settings = {
       # Default conversation model is Claude Haiku 5.5 through the subscription
-      # DirectSDK route. Its compaction trigger is 80k via compression.model_thresholds
+      # DirectSDK route. Its compaction trigger is 90k via compression.model_thresholds
       # (see compression below), and other models keep the global 300k cap. GPT-6 Luna remains
       # the native delegation model and an explicit alias (luna); explicit
       # aliases preserve manual model selection when needed.
@@ -792,10 +792,11 @@ in
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
         # Luna is the native delegation model and explicitly uses high here;
-        # the general route baseline remains medium, as does Sol by inheritance.
+        # Haiku (default conversation model) also uses high, matching Luna.
+        # The general route baseline remains medium, as does Sol by inheritance.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
-          "claude-haiku-5-5" = "medium";
+          "claude-haiku-5-5" = "high";
           "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "high";
@@ -820,11 +821,11 @@ in
         # Global cap stays at 300k for every model: huge prefixes burn subscription
         # allowance, weaken focus, and are less cache-friendly than a compacted
         # stable prefix. Haiku 5.5 is the one exception: model_thresholds below
-        # triggers it at 8% of its 1M window (80k). Luna, Sol, Sonnet, and Opus are
+        # triggers it at 9% of its 1M window (90k). Luna, Sol, Sonnet, and Opus are
         # unaffected. Revisit after measuring real Haiku usage.
         threshold_tokens = 300000;
         model_thresholds = {
-          "claude-subscription-directsdk-experimental:claude-haiku-5-5" = 0.08;
+          "claude-subscription-directsdk-experimental:claude-haiku-5-5" = 0.09;
         };
         target_ratio = 0.20;
         protect_last_n = 120;
