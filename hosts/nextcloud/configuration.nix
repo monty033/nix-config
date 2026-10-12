@@ -142,6 +142,12 @@
       autoStart = true;
       # Host 8100 -> container 80 (the health-checked port in the smoke test).
       ports = [ "8100:80" ];
+      # The Document Server downloads files from Nextcloud via the storage
+      # address. Resolve Nextcloud's public name to the podman gateway (the
+      # host, on the container's own network) so the fetch stays local and
+      # does not depend on hairpin NAT. The Host header stays drive.montycasa.com,
+      # which Nextcloud already trusts.
+      extraOptions = [ "--add-host=drive.montycasa.com:10.88.0.1" ];
       environmentFiles = [
         config.sops.templates."euro-office-env".path
       ];
