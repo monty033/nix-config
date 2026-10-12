@@ -41,6 +41,8 @@
     "d /mnt/media 0755 root root -"
     "d /mnt/media/downloads 0755 root root -"
     "d /mnt/media/web 0755 root root -"
+    "d /var/lib/isponsorblocktv 0755 root root -"
+    "d /var/lib/isponsorblocktv/data 0755 root root -"
   ];
 
   extra-services.mount_media.enable = true;
@@ -457,6 +459,22 @@
         volumes = [
           "/var/lib/minuspod:/app/data"
         ];
+      };
+
+      isponsorblocktv = {
+        image = "ghcr.io/dmunozv04/isponsorblocktv:latest";
+        autoStart = true;
+        volumes = [
+          "/var/lib/isponsorblocktv/data:/app/data:Z"
+        ];
+        extraOptions = [
+          "--network=host"
+          "--user=0:0"
+          "--log-driver=journald"
+        ];
+        environment = {
+          PYTHONUNBUFFERED = "1";
+        };
       };
     };
   };

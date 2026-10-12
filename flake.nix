@@ -39,7 +39,7 @@
     # an implicit state directory instead of passing against an empty store, so
     # the operator sync wrapper must now name the store explicitly.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=6589748bfd5d2d53e469d505f1d063ab77406c0f";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=89c26d208b0aadf68505db64397c74fa51a61f06";
       flake = false;
     };
 

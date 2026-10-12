@@ -163,12 +163,6 @@
         upstream = "192.168.86.137:8080";
       };
 
-      # Operator-confirmed LAN/Tailscale-only proxy; perimeter not independently live-verified.
-      "hermes.montycasa.net" = {
-        protocol = "http";
-        upstream = "192.168.86.126:8787";
-      };
-
       # Mercury's HTTPS entry point for the Hermes dashboard. The dashboard
       # listener is restricted to tailscale0, so keep the proxy upstream on
       # the Hermes host's Tailscale address rather than its LAN address.
@@ -183,6 +177,15 @@
       "opencode.montycasa.net" = {
         protocol = "http";
         upstream = "100.81.254.49:4096";
+      };
+
+      # NookBridge progress dashboard. The app serves /nookbridge itself
+      # (Caddy only proxies the hostname). Upstream is the Hermes host's
+      # Tailscale address; the listener is restricted to tailscale0.
+      # No app login: tailnet membership is the only gate.
+      "dash.montycasa.net" = {
+        protocol = "http";
+        upstream = "100.81.254.49:9130";
       };
 
       # Pi-hole admin/API web UIs — Gate 3B. local-proxy is reachable only

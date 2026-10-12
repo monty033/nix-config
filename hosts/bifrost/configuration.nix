@@ -4,112 +4,6 @@
 
 { config, lib, pkgs, ... }:
 
-let
-  tasknotes-calendar-python = pkgs.python3.withPackages (ps: [ ps.icalendar ]);
-
-  tasknotes-calendar-validator = pkgs.writeText "tasknotes-calendar-validator.py" ''
-    import re
-    import sys
-    from pathlib import Path
-
-    from icalendar import Calendar
-
-    UID_PATTERN = re.compile(r"^tasknotes-[0-9a-f]{64}@montycasa\.net$")
-
-    try:
-        if len(sys.argv) != 2:
-            raise ValueError("missing calendar path")
-        calendar = Calendar.from_ical(Path(sys.argv[1]).read_bytes())
-        if str(calendar.get("VERSION", "")) != "2.0":
-            raise ValueError("invalid calendar version")
-        if not str(calendar.get("PRODID", "")).strip():
-            raise ValueError("missing calendar product id")
-
-        events = list(calendar.walk("VEVENT"))
-        if not events:
-            raise ValueError("calendar contains no events")
-
-        seen_uids = set()
-        for event in events:
-            uid = str(event.get("UID", "")).strip()
-            if not UID_PATTERN.fullmatch(uid) or uid in seen_uids:
-                raise ValueError("invalid or duplicate event UID")
-            seen_uids.add(uid)
-            if event.get("DTSTART") is None or not str(event.get("SUMMARY", "")).strip():
-                raise ValueError("event is missing required fields")
-            dtstart = event.decoded("DTSTART")
-            if event.get("DTEND") is not None and event.decoded("DTEND") < dtstart:
-                raise ValueError("event date range is invalid")
-    except Exception:
-        raise SystemExit(1)
-  '';
-
-  tasknotes-calendar-publish = pkgs.writeShellScriptBin "tasknotes-calendar-publish" ''
-    set -euo pipefail
-
-    token="$(${pkgs.coreutils}/bin/cat ${config.sops.secrets."tasknotes-calendar-feed-token".path})"
-    if [ -z "$token" ]; then
-      echo "TaskNotes feed token is empty" >&2
-      exit 1
-    fi
-    case "$token" in
-      *[!A-Za-z0-9_-]*)
-        echo "TaskNotes feed token contains an unsafe URL-path character" >&2
-        exit 1
-        ;;
-    esac
-    token_length="$(${pkgs.coreutils}/bin/printf '%s' "$token" | ${pkgs.coreutils}/bin/wc -c)"
-    if [ "$token_length" -lt 32 ] || [ "$token_length" -gt 256 ]; then
-      echo "TaskNotes feed token length is outside the accepted range" >&2
-      exit 1
-    fi
-
-    if ! TASKNOTES_TOKEN="$token" ${tasknotes-calendar-python}/bin/python3 -c 'from pathlib import Path; import os; Path("/var/www/ical/tasknotes", os.environ["TASKNOTES_TOKEN"]).mkdir(mode=0o755, exist_ok=True)' 2>/dev/null; then
-      echo "TaskNotes publication directory setup failed" >&2
-      exit 1
-    fi
-    if ! cd "/var/www/ical/tasknotes/$token" 2>/dev/null; then
-      echo "TaskNotes publication directory access failed" >&2
-      exit 1
-    fi
-    if ! temporary="$(${pkgs.coreutils}/bin/mktemp ".tasknotes-calendar.XXXXXX" 2>/dev/null)"; then
-      echo "TaskNotes temporary file setup failed" >&2
-      exit 1
-    fi
-    cleanup() {
-      ${pkgs.coreutils}/bin/rm -f "$temporary" 2>/dev/null || true
-    }
-    trap cleanup EXIT
-
-    if ! ${pkgs.coreutils}/bin/cat > "$temporary" 2>/dev/null; then
-      echo "TaskNotes calendar input failed" >&2
-      exit 1
-    fi
-    if ! ${tasknotes-calendar-python}/bin/python3 ${tasknotes-calendar-validator} "$temporary"; then
-      echo "TaskNotes calendar validation failed" >&2
-      exit 1
-    fi
-    if ! ${pkgs.coreutils}/bin/chmod 0644 "$temporary" 2>/dev/null; then
-      echo "TaskNotes calendar permission setup failed" >&2
-      exit 1
-    fi
-    if ! ${pkgs.coreutils}/bin/mv -f "$temporary" "tasknotes.ics" 2>/dev/null; then
-      echo "TaskNotes calendar publication failed" >&2
-      exit 1
-    fi
-    trap - EXIT
-  '';
-
-  tasknotes-publisher-shell = pkgs.writeShellScriptBin "tasknotes-publisher-shell" ''
-    if [ "$#" -ne 2 ] || [ "$1" != "-c" ] || [ "$2" != "/run/current-system/sw/bin/tasknotes-calendar-publish" ]; then
-      echo "Only the TaskNotes publisher command is permitted" >&2
-      exit 1
-    fi
-    exec ${tasknotes-calendar-publish}/bin/tasknotes-calendar-publish
-  '' // {
-    shellPath = "/bin/tasknotes-publisher-shell";
-  };
-in
 {
   imports =
     [ # Include the results of the hardware scan.
@@ -121,7 +15,6 @@ in
     mtr
     rsync
     sysstat
-    tasknotes-calendar-publish
   ];
 
   networking.hostName = "bifrost";
@@ -131,14 +24,6 @@ in
     home = "/home/patrick";
     description = "Parick";
     extraGroups = [ "wheel" "networkmanager" ];
-  };
-
-  users.groups."tasknotes-publisher" = {};
-  users.users."tasknotes-publisher" = {
-    isSystemUser = true;
-    group = "tasknotes-publisher";
-    home = "/var/empty";
-    shell = tasknotes-publisher-shell;
   };
 
   extra-services.auto-upgrade = {
@@ -165,12 +50,6 @@ in
   
   sops.secrets.cloudflare-api-token = {
     owner = "caddy";
-    mode = "0400";
-  };
-
-  sops.secrets."tasknotes-calendar-feed-token" = {
-    owner = "tasknotes-publisher";
-    group = "tasknotes-publisher";
     mode = "0400";
   };
 
@@ -287,7 +166,6 @@ in
   systemd.tmpfiles.rules = [
     "d /var/www/ical 0755 patrick users -"
     "d /var/www/ical/sports 0755 patrick users -"
-    "d /var/www/ical/tasknotes 0711 tasknotes-publisher tasknotes-publisher -"
   ];
 
   networking.useDHCP = false;

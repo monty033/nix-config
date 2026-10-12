@@ -5,6 +5,16 @@ let
     system = pkgs.stdenv.hostPlatform.system;
     config.allowUnfree = true;
   };
+  # The DirectSDK plugin discovers the subscription model catalog through
+  # Claude Code at runtime and requires CLI 2.1.293 or newer. Keep this newer
+  # vendor-binary CLI isolated to Hermes, using nixpkgs' manifest override.
+  claudeCodeForHermes = let
+    package = pkgs-unstable.claude-code.override {
+      manifest = builtins.fromJSON (builtins.readFile ../../../packages/claude-code-2.1.293-manifest.json);
+    };
+  in
+    assert lib.versionAtLeast package.version "2.1.293";
+    package;
   nookbridge = pkgs.callPackage ../../../packages/nookbridge.nix { inherit inputs; };
   opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
   opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
@@ -159,22 +169,23 @@ let
   '';
   # Claude Subscription DirectSDK (experimental) — routes Hermes inference
   # through the official Claude Code CLI so a Claude Pro/Max subscription can
-  # serve as a conversation model. Pinned by COMMIT, not version: upstream
-  # 0.3.0 spans materially different prompt-cache implementations, so the tag
-  # alone is not a safe pin.
+  # serve as a conversation model. The plugin now discovers available models
+  # live through Claude Code and requires CLI >= 2.1.293. Pinned by COMMIT, not
+  # version: upstream 0.3.0 spans materially different prompt-cache
+  # implementations, so the tag alone is not a safe pin.
   #
   # The plugin declares no Python dependencies and Hermes' plugin loader
   # imports the directory directly (verified by running it from a plugin
   # directory with no PYTHONPATH changes), so no extraPythonPackages entry is
-  # needed. Runtime prerequisites are the `claude` CLI — provided above as
-  # pkgs-unstable.claude-code — and a logged-in subscription in the hermes
-  # user's ~/.claude. It is enabled only as an ADDITIONAL selectable route;
-  # model.default/model.provider stay on openai-codex.
+  # needed. Runtime prerequisite is the `claude` CLI — provided above as
+  # claudeCodeForHermes — alongside the hermes user's existing subscription.
+  # It is the active default route (model.default / model.provider in the
+  # settings block below) and the source of the Claude availability fallbacks.
   claudeSubscriptionDirectsdkSrc = pkgs.fetchFromGitHub {
     owner = "NousResearch";
     repo = "hermes-plugin-claude-subscription-directsdk";
-    rev = "602393b6d3ea148bc618cd23da1a13fa332e1433";
-    hash = "sha256-Ll0bmt+UJONvDPrfFTECVvlut/MgQIBmInYgtjYAoC0=";
+    rev = "4bc79c78031d1a042b5d8a7314ceea283db5c5e2";
+    hash = "sha256-xrCfPlPKG5qYYFx7YMTo8Gp+bERcrSFvFZBUHgiM44M=";
   };
   claudeSubscriptionDirectsdkPlugin =
     pkgs.runCommand "claude-subscription-directsdk-hermes-plugin" { } ''
@@ -278,11 +289,9 @@ in
   # Scope each port to the interface that actually needs it instead of
   # exposing all three on every network path into the host.
   #
-  # WebUI is bound to the Hermes LAN address; keep its direct listener scoped
-  # to the LAN interface for the local-proxy reverse proxy.
-  networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 8787 ];
+  networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 ];
   # OpenCode v2 server (4096) is likewise reachable only over Tailscale.
-  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 4096 ];
+  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 4096 9130 ];
 
   # python3.12 doc build broken in nixpkgs 26.05 (upstream issue #529084)
   documentation.man.enable = false;
@@ -293,7 +302,6 @@ in
     lxc = true;
   };
   extra-services.host-checkin.enable = true;
-  extra-services.hermes-relay.enable = true;
   extra-services.nookbridge = {
     enable = true;
     # Keep the deployed policy declarative in Nix rather than sourcing JSON.
@@ -336,15 +344,6 @@ in
   systemd.services.hermes-dashboard.restartTriggers =
     [ config.services.hermes-agent.package ]
     ++ config.services.hermes-agent.extraPlugins;
-  # The WebUI is a third Hermes surface over the same home and plugin set: it
-  # runs provider discovery, which calls into model-provider plugins. It needs
-  # both the vendor CLI on PATH (the subscription plugin resolves its transport
-  # with a PATH lookup) and a restart when the plugin set changes, or its model
-  # list would go stale and report the provider unavailable.
-  systemd.services.hermes-webui.path = [ pkgs-unstable.claude-code ];
-  systemd.services.hermes-webui.restartTriggers =
-    [ config.services.hermes-agent.package ]
-    ++ config.services.hermes-agent.extraPlugins;
   extra-services.obsidian-headless = {
     enable = true;
     # Run the sync daemon as the same Unix user that writes vault files
@@ -355,7 +354,7 @@ in
     vaults.MontyVault.path = "/var/lib/hermes/vault/MontyVault";
     # `unsupported` is required for .ics / .base / .canvas and other
     # extensions outside Obsidian's default allowlist. Without it, files
-    # like tasknotes-calendar.ics are silently dropped before upload even
+    # like .ics or .base files are silently dropped before upload even
     # when the phone's "Sync all other types" toggle is on.
     fileTypes.MontyVault = [ "image" "audio" "pdf" "video" "unsupported" ];
   };
@@ -375,7 +374,7 @@ in
   };
 
   environment.systemPackages = with pkgs; [
-    pkgs-unstable.claude-code
+    claudeCodeForHermes
     pkgs-unstable.codex
     opencode-v2
     opencode-api
@@ -393,14 +392,6 @@ in
   # Hermes gateway API keys stay in openclaw-env. Forgejo Git authentication is
   # a separate, runtime-only file consumed solely by the URL-scoped helper.
   sops.secrets."openclaw-env" = {
-    owner = "hermes";
-    group = "users";
-    mode = "0400";
-  };
-  # WebUI authentication is separate from the agent's provider environment.
-  # The encrypted value contains the WebUI authentication assignment and is
-  # never embedded in Nix or exposed through the generated system closure.
-  sops.secrets."hermes-webui-env" = {
     owner = "hermes";
     group = "users";
     mode = "0400";
@@ -504,25 +495,12 @@ in
       (pkgs.runCommand "health-log-hermes-plugin" { } ''
         cp -r ${./plugins/health-log} $out
       '')
-      # Hermes-Relay plugin (v1.5.0): QR pairing, `hermes pair` and
-      # `hermes relay` CLI sub-commands, android_*/desktop_*/relay_* tools,
-      # and dashboard relay routes. The plugin loader imports this directory
-      # directly (no separate Python package needed at discovery time);
-      # runtime deps (aiohttp, segno, ...) are picked up by the
-      # hermes-relay systemd service via its own python interpreter
-      # (see extra-services.hermes-relay below). The wheel's
-      # `plugin/hermes_relay_bootstrap/` (legacy `.pth` compat hook) is
-      # intentionally excluded. Keep `plugin/voice_lab/`: relay imports
-      # its expressions, metrics, and provider base modules on CLI startup,
-      # even when optional voice provider keys are unset.
-      (pkgs.runCommand "hermes-relay-hermes-plugin" { } ''
-        cp -r ${./plugins/hermes-relay} $out
-      '')
       # Mnemosyne plugin and its pinned Python runtime are packaged above;
       # this replaces the mutable wrapper generated by the installer.
       mnemosyneHermesPlugin
-      # Claude Pro/Max via the official Claude Code CLI. Adds a subscriber
-      # route; it does not change the default model or any fallback.
+      # Claude Pro/Max via the official Claude Code CLI. Provides the default
+      # conversation route (model.default / model.provider) and the Claude
+      # fallbacks; Codex stays as the last, independent fallback.
       claudeSubscriptionDirectsdkPlugin
     ];
     # The subscription model-provider plugin resolves its transport by looking
@@ -533,20 +511,21 @@ in
     #
     # The same applies to the discovery-time provider check the dashboard
     # performs (see systemd.services.hermes-dashboard.path below).
-    extraPackages = [ pkgs-unstable.claude-code ];
+    extraPackages = [ claudeCodeForHermes ];
     extraPythonPackages = [
       mnemosyneMemory
       mnemosyneHermes
     ];
 
     settings = {
-      # Default conversation model is GPT-6 Luna at high reasoning. Claude and
-      # Codex are the only active model families: Luna owns both the conversational
-      # front door and native delegation; explicit aliases preserve manual model
-      # selection when needed.
+      # Default conversation model is Claude Haiku 5.5 through the subscription
+      # DirectSDK route. Its compaction trigger is 80k via compression.model_thresholds
+      # (see compression below), and other models keep the global 300k cap. GPT-6 Luna remains
+      # the native delegation model and an explicit alias (luna); explicit
+      # aliases preserve manual model selection when needed.
       model = {
-        default = "gpt-6-luna";
-        provider = "openai-codex";
+        default = "claude-haiku-5-5";
+        provider = "claude-subscription-directsdk-experimental";
         # Luna's actual reasoning level is set via agent.reasoning_overrides
         # below ("gpt-6-luna" = "high"), not here — `model.reasoning_effort`
         # is not a recognized key in this section's schema and was a dead
@@ -556,7 +535,7 @@ in
         # See hermes_cli/model_switch.py::resolve_alias().
         # Strings of '<provider>/<model>' are split on '/' into provider + model.
         aliases = {
-          haiku = "claude-subscription-directsdk-experimental/claude-haiku-4-5-20251001";
+          haiku = "claude-subscription-directsdk-experimental/claude-haiku-5-5";
           sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5-5";
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
           luna = "openai-codex/gpt-6-luna";
@@ -592,12 +571,13 @@ in
         idle_minutes = 2880;
       };
 
-      # Fallbacks are availability routes, not quality routing. A Codex outage
-      # crosses immediately to Claude Sonnet, then Haiku for a lower-cost
-      # second attempt within the Claude subscription.
+      # Fallbacks are availability routes, not quality routing. Claude is the
+      # default route, so the first entry (Sonnet) stays on the same subscription
+      # provider. The last entry is Codex (GPT-6 Luna), an independent provider,
+      # so a Claude-subscription outage still has a non-Claude backup.
       fallback_providers = [
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
-        { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+        { provider = "openai-codex"; model = "gpt-6-luna"; }
       ];
 
       # Mixture of Agents presets. Keep two explicit cross-provider choices:
@@ -613,7 +593,7 @@ in
         default_preset = "standard";
         presets.standard = {
           reference_models = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
             { provider = "openai-codex"; model = "gpt-6-luna"; }
           ];
           aggregator = {
@@ -654,7 +634,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -663,7 +643,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -672,7 +652,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -690,7 +670,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -699,7 +679,7 @@ in
           model = "gpt-6-luna";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-4-5-20251001"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
 
@@ -752,9 +732,10 @@ in
       # Voice requests get Home Assistant plus one narrow health write action.
       # They never receive generic file, shell, browser, or Google tools.
       platform_toolsets.api_server = [ "homeassistant" "health_log" ];
-      # claude-subscription-directsdk-experimental provides selectable Claude
-      # Pro routes and availability fallbacks for Codex routes.
-      plugins.enabled = [ "health-log" "hermes-relay" "hermes-mnemosyne" "claude-subscription-directsdk-experimental" ];
+      # claude-subscription-directsdk-experimental provides the default Claude
+      # Pro route, its aliases, and the Claude fallbacks; openai-codex remains
+      # the last independent fallback.
+      plugins.enabled = [ "health-log" "hermes-mnemosyne" "claude-subscription-directsdk-experimental" ];
 
       # The v0.19 migration is blocked in Nix-managed mode. Declare its schema
       # marker here; the disposable migration lab validated this is sufficient.
@@ -778,11 +759,11 @@ in
         reasoning_effort = "medium";
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
-        # Luna is the conversational default and explicitly uses high here;
+        # Luna is the native delegation model and explicitly uses high here;
         # the general route baseline remains medium, as does Sol by inheritance.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
-          "claude-haiku-4-5-20251001" = "medium";
+          "claude-haiku-5-5" = "medium";
           "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
           "gpt-6-luna" = "high";
@@ -804,10 +785,15 @@ in
         # across the rewrite, so gateway routing, /goal, and session_search
         # stay coherent across long topic sessions.
         threshold = 0.85;
-        # Deliberately cap live conversation context at 300k even when a model
-        # advertises a larger window: huge prefixes burn subscription allowance,
-        # weaken focus, and are less cache-friendly than a compacted stable prefix.
+        # Global cap stays at 300k for every model: huge prefixes burn subscription
+        # allowance, weaken focus, and are less cache-friendly than a compacted
+        # stable prefix. Haiku 5.5 is the one exception: model_thresholds below
+        # triggers it at 8% of its 1M window (80k). Luna, Sol, Sonnet, and Opus are
+        # unaffected. Revisit after measuring real Haiku usage.
         threshold_tokens = 300000;
+        model_thresholds = {
+          "claude-subscription-directsdk-experimental:claude-haiku-5-5" = 0.08;
+        };
         target_ratio = 0.20;
         protect_last_n = 120;
         protect_first_n = 3;
@@ -907,7 +893,7 @@ in
                   { name = "Hermes";           skill = "topic-hermes";          thread_id = 87624; }
                   { name = "Health & Fitness"; skill = "topic-health-fitness";  thread_id = 92608; }
                   { name = "Homelab";          skill = "topic-homelab";         thread_id = 87193; }
-                  { name = "Tasks";            skill = "topic-tasks";           thread_id = 87814; }
+                  { name = "Tasks";            skill = "topic-pm";              thread_id = 87814; }
                   { name = "Briefing";         skill = "topic-briefing";        thread_id = 90466; }
                   { name = "General";          skill = "topic-general";         thread_id = 87664; }
                   { name = "CHOP";             skill = "topic-chop";            thread_id = 88598; }
@@ -1022,6 +1008,7 @@ in
     "R /var/lib/hermes/.local/state/bernie-delegation"
     "d /var/lib/hermes/.cache 0700 hermes users -"
     "d /var/lib/hermes/.hermes/mnemosyne 0750 hermes users -"
+    "d /var/lib/hermes/nookbridge-dash 0750 hermes users -"
     "d /var/lib/hermes/.hermes/plugins 0750 hermes users -"
     # The memory provider loader resolves providers by this directory name;
     # expose the Nix-built plugin at the canonical `mnemosyne` path instead of
@@ -1038,55 +1025,6 @@ in
     "z /var/lib/hermes/.hermes/mnemosyne/data/shared/mnemosyne.db-shm 0600 hermes users -"
   ];
 
-
-  systemd.services.tasknotes-calendar-publish = {
-    description = "Publish the validated TaskNotes calendar to Bifrost";
-    wants = [ "network-online.target" ];
-    after = [ "network-online.target" "obsidian-headless-MontyVault.service" ];
-    environment = {
-      HOME = "/var/lib/hermes";
-      HERMES_HOME = "/var/lib/hermes/.hermes";
-    };
-    serviceConfig = {
-      Type = "oneshot";
-      User = "hermes";
-      Group = "users";
-      WorkingDirectory = "/var/lib/hermes";
-      # The publisher is maintained in Hermes Library, not nix-config. Fail
-      # clearly if the library deployment is missing rather than reporting a
-      # misleading Python/import failure.
-      ExecStartPre = [
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/publish_tasknotes_calendar.py"
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/generate_tasknotes_calendar.py"
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/normalize_tasknotes_calendar.py"
-        "${pkgs.coreutils}/bin/test -r /var/lib/hermes/.hermes/scripts/calendars/validate_ics.py"
-      ];
-      ExecStart = "${hermesPython}/bin/python3 /var/lib/hermes/.hermes/scripts/calendars/publish_tasknotes_calendar.py";
-      TimeoutStartSec = 120;
-    };
-  };
-
-  systemd.paths.tasknotes-calendar-publish = {
-    wantedBy = [ "multi-user.target" ];
-    pathConfig = {
-      PathChanged = [
-        "/var/lib/hermes/vault/MontyVault/TaskNotes"
-        "/var/lib/hermes/vault/MontyVault/TaskNotes/Tasks"
-        "/var/lib/hermes/vault/MontyVault/TaskNotes/Archive"
-      ];
-      Unit = "tasknotes-calendar-publish.service";
-    };
-  };
-
-  systemd.timers.tasknotes-calendar-publish-fallback = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "5min";
-      OnUnitActiveSec = "15min";
-      Persistent = true;
-      Unit = "tasknotes-calendar-publish.service";
-    };
-  };
 
   # Nix-managed calendar publishers. The legacy Hermes family job and sports
   # service remain installed as manual rollback paths, but are no longer
@@ -1206,6 +1144,37 @@ in
       fi
     '';
 
+  # One-time cleanup of a stale key. The upstream hermes-config-merge only
+  # adds and overwrites keys, so removing a Nix-owned entry needs an explicit
+  # step after the merge. This removes only
+  # agent.reasoning_overrides.claude-haiku-4-5-20251001, from #407's era, and
+  # is a no-op once the key is gone. Remove this block after one successful
+  # rebuild has verified the key is absent.
+  system.activationScripts.hermes-prune-stale-haiku45-override =
+    lib.stringAfter [ "hermes-agent-setup" ] ''
+      hermes_cfg=/var/lib/hermes/.hermes/config.yaml
+      if [ -f "$hermes_cfg" ]; then
+        # Non-fatal: a failure here warns and never blocks activation.
+        ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -c '
+import sys, yaml
+from pathlib import Path
+p = Path(sys.argv[1])
+try:
+    data = yaml.safe_load(p.read_text())
+    if not isinstance(data, dict):
+        raise SystemExit(0)
+    agent = data.get("agent")
+    overrides = agent.get("reasoning_overrides") if isinstance(agent, dict) else None
+    if isinstance(overrides, dict) and "claude-haiku-4-5-20251001" in overrides:
+        del overrides["claude-haiku-4-5-20251001"]
+        p.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+        print("pruned stale claude-haiku-4-5-20251001 reasoning override")
+except Exception as e:
+    print("hermes-prune-stale-haiku45-override: skipped: " + type(e).__name__, file=sys.stderr)
+' "$hermes_cfg" || echo "hermes-prune-stale-haiku45-override: warning, continuing" >&2 || true
+      fi
+    '';
+
   users.users.hermes = {
     linger = true;
     extraGroups = [ "nookbridge-clients" "nookbridge-operators" ];
@@ -1245,7 +1214,7 @@ in
     # extraPlugins restart trigger), and the subscription model-provider plugin
     # resolves its transport by looking up the vendor CLI on PATH. Without this
     # the dashboard's provider discovery cannot see the CLI.
-    path = [ pkgs-unstable.claude-code ];
+    path = [ claudeCodeForHermes ];
     environment = {
       HOME = "/var/lib/hermes";
       HERMES_HOME = "/var/lib/hermes/.hermes";
@@ -1272,7 +1241,7 @@ in
       HOME = "/var/lib/hermes";
       OPENCODE_CONFIG_CONTENT = builtins.readFile opencode-server-config;
     };
-    path = [ pkgs-unstable.claude-code ];
+    path = [ claudeCodeForHermes ];
     serviceConfig = {
       User = "hermes";
       Group = "users";
@@ -1291,22 +1260,38 @@ in
     };
   };
 
-  services.hermes-webui = {
-    enable = true;
-    user = "hermes";
-    group = "users";
-    host = "192.168.86.126";
-    port = 8787;
-    stateDir = "/var/lib/hermes-webui";
-    hermesHome = "/var/lib/hermes/.hermes";
-    agent.package = config.services.hermes-agent.package;
-    environmentFiles = [
-      config.sops.secrets."openclaw-env".path
-      config.sops.secrets."hermes-webui-env".path
-    ];
-    extraEnvironment = {
-      HERMES_WEBUI_DEFAULT_WORKSPACE = "/var/lib/hermes/workspace";
-      HERMES_WEBUI_SERVER_CWD = "/var/lib/hermes/workspace";
+  # NookBridge progress dashboard (served as dash.montycasa.net/nookbridge
+  # through local-proxy). Stdlib Python; SQLite is the source of truth.
+  # Bound only to Hermes' Tailscale address and firewalled to tailscale0.
+  # No login: anyone on the tailnet can edit (accepted by Patrick).
+  # Source runs from the Hermes workspace; the database lives in the
+  # hermes state directory.
+  systemd.services.nookbridge-dash = {
+    description = "NookBridge progress dashboard (Tailscale only)";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" ];
+    after = [ "network-online.target" "tailscaled.service" "tailscaled-autoconnect.service" ];
+    serviceConfig = {
+      User = "hermes";
+      Group = "users";
+      # SQLite creates the DB and sidecar files with this umask: owner-only.
+      UMask = "0077";
+      WorkingDirectory = "/var/lib/hermes/workspace/nookbridge-dash";
+      # The bind address only exists once tailscaled is authenticated; wait
+      # for it instead of crash-looping at boot. Never falls back to 0.0.0.0.
+      ExecStartPre = [
+        "${pkgs.writeShellScript "nookbridge-dash-wait-tailscale" ''
+          for i in $(seq 1 90); do
+            ${pkgs.iproute2}/bin/ip -4 addr show dev tailscale0 | ${pkgs.gnugrep}/bin/grep -qF "inet ${hermesTailscaleIp}/" && exit 0
+            sleep 1
+          done
+          echo "tailscale address ${hermesTailscaleIp} not available" >&2
+          exit 1
+        ''}"
+      ];
+      ExecStart = "${pkgs.python3}/bin/python3 /var/lib/hermes/workspace/nookbridge-dash/app/server.py --bind ${hermesTailscaleIp} --port 9130 --db /var/lib/hermes/nookbridge-dash/dash.db --host dash.montycasa.net";
+      Restart = "on-failure";
+      RestartSec = 5;
     };
   };
 

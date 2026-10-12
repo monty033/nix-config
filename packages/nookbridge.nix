@@ -20,7 +20,7 @@ buildNpmPackage rec {
   src = inputs.nookbridge;
   nodejs = nodejs_22;
 
-  npmDepsHash = "sha256-rJzPX6rnXgoCpKMbmigvEYw5xIh5bWdTebgsf2iMDEc=";
+  npmDepsHash = "sha256-BtaHuNOkEVYKPBhNC1ki9gvxDejYbHwGg1mXVCnizhs=";
   npmRebuildFlags = [ "--ignore-scripts" ];
 
   preBuild = ''
