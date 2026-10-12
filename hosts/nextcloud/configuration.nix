@@ -121,6 +121,33 @@
     securityNonceFile = config.sops.secrets."onlyoffice-security-nonce".path;
   };
 
+  # Euro-Office DocumentServer: soak candidate on office.montycasa.com.
+  # ONLYOFFICE above stays live. The Nextcloud connector is switched by
+  # an occ change at cutover, not by this file.
+  # Reuses the existing onlyoffice-jwt-secret, so the connector's shared
+  # secret does not change and no new SOPS key is needed.
+  sops.templates."euro-office-env" = {
+    content = ''
+      JWT_ENABLED=true
+      JWT_SECRET=${config.sops.placeholder."onlyoffice-jwt-secret"}
+    '';
+    mode = "0400";
+  };
+
+  virtualisation.oci-containers = {
+    backend = "podman";
+    containers.euro-office = {
+      # Pinned by digest, not by tag. Tag 9.3.5 is not published.
+      image = "ghcr.io/euro-office/documentserver:v9.3.5@sha256:b303064a69d0a4f81ba5945126c4c484fc08bf42436fc97bb85413429e27ba9e";
+      autoStart = true;
+      # Host 8100 -> container 80 (the health-checked port in the smoke test).
+      ports = [ "8100:80" ];
+      environmentFiles = [
+        config.sops.templates."euro-office-env".path
+      ];
+    };
+  };
+
   # Enable podman w/ docker socket for AppAPI
   virtualisation.podman = {
     enable = true;
@@ -130,7 +157,7 @@
   };
   users.users.nextcloud.extraGroups = [ "podman" ];
 
-  networking.firewall.allowedTCPPorts = [ 80 443 8000 ];
+  networking.firewall.allowedTCPPorts = [ 80 443 8000 8100 ];
 
   system.stateVersion = "25.05";
 }
