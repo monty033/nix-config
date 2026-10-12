@@ -98,9 +98,9 @@
     settings = {
       overwriteProtocol = "https";
       default_phone_region = "US";
-      overwritehost = "drive.montycasa.com";
+      overwritehost = config.services.nextcloud.hostName;
       trusted_proxies = [ "147.182.139.226" "100.84.116.17" "45.33.94.83" "100.106.205.39" ];
-      overwrite.cli.url = "https://drive.montycasa.com";
+      overwrite.cli.url = "https://${config.services.nextcloud.hostName}";
       filesystem_check_changes = 1;
       # trusted_domains = ["192.168.86.136"];
     };
@@ -111,6 +111,22 @@
     };
     # Suggested by Nextcloud's health check.
     phpOptions."opcache.interned_strings_buffer" = "16";
+  };
+
+  # One-time cleanup: a flat `overwrite.cli.url` key holding a stale .net value
+  # is left in config.php. The module merges config.php and does not remove keys
+  # it no longer owns, so delete that literal key once after nextcloud-setup.
+  # Remove this unit after one verified rebuild.
+  systemd.services.nextcloud-delete-stale-cli-url = {
+    description = "Delete stale flat overwrite.cli.url from Nextcloud config";
+    wantedBy = [ "multi-user.target" ];
+    requires = [ "nextcloud-setup.service" ];
+    after = [ "nextcloud-setup.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:system:delete overwrite.cli.url";
+    };
   };
 
   # OnlyOffice Document Server
