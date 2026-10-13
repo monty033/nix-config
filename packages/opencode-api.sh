@@ -23,6 +23,15 @@ api() { # api METHOD PATH [JSON]
 }
 die() { echo "opencode-api: $*" >&2; exit 2; }
 
+# Path identifiers must be a strict safe subset before they are placed in a URL
+# path, and are percent-encoded on top of that as defence in depth.
+valid_id() { case "$1" in ''|.|..|*[!A-Za-z0-9._-]*) return 1;; *) return 0;; esac; }
+enc() { jq -rn --arg s "$1" '$s|@uri'; }
+# Output escaping for server-controlled text. escfull escapes every C0/DEL/C1 control;
+# esctext keeps tab and newline. Fields are escaped BEFORE joining, never with @tsv
+# afterwards (@tsv would re-escape the backslashes this adds).
+ESC_DEFS='def hex4: . as $n | [($n/4096|floor),(($n/256|floor)%16),(($n/16|floor)%16),($n%16)] | map("0123456789abcdef"[.:.+1]) | join(""); def escfull: tostring | gsub("(?<c>[\u0000-\u001f\u007f-\u009f])"; (.c|explode[0]) as $n | "\\u" + ($n|hex4)); def esctext: tostring | gsub("(?<c>[\u0000-\u0008\u000b-\u001f\u007f-\u009f])"; (.c|explode[0]) as $n | "\\u" + ($n|hex4));'
+
 # Deny-list attached to every free-model session (best effort, evolves over time).
 # Action name for the shell tool is "shell" (NOT "bash"); patterns match the command.
 DENY_SHELL=('ssh*' '*ssh *' 'scp*' 'sudo*' 'nixos-rebuild*' '*nixos-rebuild*' 'nookctl*' '*nookctl*'
@@ -52,7 +61,18 @@ opencode-api <cmd> [args]
   deny SID                                (re)attach the free-model deny-list
   fork SID                                fork full history into a new session
   interrupt SID | diff SID | info SID
-  (prompt|switch|deny|fork|interrupt accept --force anywhere to act on non-bernie/ sessions)
+  permissions SID                         list pending permission requests for a session
+        Columns: request ID (JSON string), action (JSON string), resources (JSON),
+        proposed saved patterns (JSON).
+  permission SID REQUESTID                inspect one exact pending permission request
+  reply SID REQUESTID once|reject [--reject-all-pending]
+        once:   approve only this request.
+        reject: V2 rejects every pending request in the session, not just this one.
+                --reject-all-pending is required for every rejection (the exact request is
+                re-fetched and the current pending count is reported before the reply).
+        The exact pending request is re-fetched and checked against SID/REQUESTID first;
+        stale or not-found requests fail closed without sending.
+  (prompt|switch|deny|fork|interrupt|reply|permissions|permission accept --force anywhere to act on non-bernie/ sessions)
 EOF
 }
 owned_session() {
@@ -60,7 +80,7 @@ owned_session() {
   title=$(api GET "/api/session/$id" | jq -r '.data.title // ""') || return 1
   if [ -z "$title" ]; then echo "opencode-api: session $id not found" >&2; return 4; fi
   if [[ $title != bernie/* && $force != true ]]; then
-    echo "opencode-api: refusing session $id (title is not bernie/*): $title" >&2
+    echo "opencode-api: refusing session $id (title is not bernie/*): $(jq -rn --arg t "$title" "$ESC_DEFS"'$t|escfull')" >&2
     return 4
   fi
   printf '%s' "$title"
@@ -69,7 +89,7 @@ owned_session() {
 cmd=${1:-}; shift || true
 force=false
 case "$cmd" in
-  prompt|switch|deny|fork|interrupt)
+  prompt|switch|deny|fork|interrupt|reply|permissions|permission)
     rest=(); force_used=0; literal_prompt_force=false
     if [ "$cmd" = prompt ] && [ "$#" -eq 2 ] && [ "${2:-}" = --force ]; then literal_prompt_force=true; fi
     for a in "$@"; do
@@ -84,10 +104,10 @@ case "$cmd" in
     for a in "$@"; do [ "$a" != --force ] || die "--force is not valid for $cmd"; done ;;
 esac
 case "$cmd" in
-  models) api GET /api/model | jq -r '.data[]|"\(.providerID)/\(.modelID)\t\([.variants[]?.id]|join(","))"' ;;
+  models) api GET /api/model | jq -r "$ESC_DEFS"'.data[]|"\((.providerID|escfull))/\((.modelID|escfull))\t\([.variants[]?.id|escfull]|join(","))"' ;;
   sessions)
-    api GET /api/session | jq -r --arg d "${1:-}" '.data[]|select($d==""or(.location.directory//"")==$d)
-      |[.id,.agent,(.model.providerID+"/"+.model.id+(if .model.variant then ":"+.model.variant else "" end)),(.time.updated|tostring),(.title//"")]|@tsv' ;;
+    api GET /api/session | jq -r --arg d "${1:-}" "$ESC_DEFS"'.data[]|select($d==""or(.location.directory//"")==$d)
+      |[(.id|escfull),(.agent|escfull),((.model.providerID+"/"+.model.id+(if .model.variant then ":"+.model.variant else "" end))|escfull),(.time.updated|escfull),((.title//"")|escfull)]|join("\t")' ;;
   create)
     dir='' title='' model='' variant='' agent=build reason='' newreason=''
     while [ $# -gt 0 ]; do case $1 in
@@ -107,14 +127,15 @@ case "$cmd" in
     body=$(jq -n --arg t "$title" --arg a "$agent" --arg p "$prov" --arg m "$mid" --arg v "$variant" --arg d "$dir" \
       '{title:$t,agent:$a,model:({id:$m,providerID:$p}+(if $v!="" then {variant:$v} else {} end)),location:{directory:$d}}')
     if is_free "$mid"; then body=$(echo "$body" | jq --argjson r "$(deny_rules)" '.permissions=$r'); echo "free model: deny-list attached" >&2; fi
-    created=$(api POST /api/session "$body" | jq -r '.data|[.id,.title]|@tsv') || die "session creation failed"
+    created=$(api POST /api/session "$body" | jq -er "$ESC_DEFS"'if (.data|type)=="object" and ((.data.id|type)=="string") and ((.data.id|length)>0) then [(.data.id|escfull),((.data.title//"")|escfull)]|join("\t") else error("no session id") end') || die "session creation failed"
     cid=${created%%$'\t'*}; ctitle=${created#*$'\t'}
     [ -n "$cid" ] || die "session creation failed"
-    echo "$ctitle" >&2; printf '%s\n' "$cid" ;;
+    printf '%s\n' "$ctitle" >&2
+    printf '%s\n' "$cid" ;;
   prompt)
     [ $# -eq 2 ] || die "prompt SID text [--force]"
     owned_session "$1" "$force" >/dev/null || exit $?
-    api POST "/api/session/$1/prompt" "$(jq -n --arg t "$2" '{text:$t}')" | jq -r '.data.id // .' ;;
+    api POST "/api/session/$1/prompt" "$(jq -n --arg t "$2" '{text:$t}')" | jq -r "$ESC_DEFS"'(.data.id // .) | if type=="string" then escfull else (tojson|esctext) end' ;;
   wait)
     sid=${1:?sid}; max=${2:-600}; t=0; seen=0; st=idle
     while [ $t -lt "$max" ]; do
@@ -124,9 +145,9 @@ case "$cmd" in
       sleep 2; t=$((t+2))
     done
     pend=$(api GET "/api/session/$sid/permission" | jq -r '.data|length') || pend=unknown
-    echo "state=$st pending_permissions=$pend" ;;
+    printf 'state=%s pending_permissions=%s\n' "$(jq -rn --arg s "$st" "$ESC_DEFS"'$s|escfull')" "$(jq -rn --arg s "$pend" "$ESC_DEFS"'$s|escfull')" ;;
   last) api GET "/api/session/${1:?sid}/message?order=desc&limit=20" | jq -r --argjson n "${2:-1}" \
-        '[.data[]|select(.type=="assistant")|.content[]?|select(.type=="text")|.text]|.[:$n]|reverse|.[]' ;;
+        "$ESC_DEFS"'[.data[]|select(.type=="assistant")|.content[]?|select(.type=="text")|.text]|.[:$n]|reverse|.[]|esctext' ;;
   switch)
     [ $# -ge 2 ] && [ $# -le 3 ] || die "switch SID PROVIDER/ID [VARIANT] [--force]"
     sid=$1; model=$2; v=${3:-}; prov=${model%%/*}; mid=${model#*/}
@@ -140,11 +161,71 @@ case "$cmd" in
     owned_session "$1" "$force" >/dev/null || exit $?
     case $cmd in
       deny) api PATCH "/api/session/$1" "$(jq -n --argjson r "$(deny_rules)" '{permissions:$r}')" >/dev/null; echo "deny-list attached" ;;
-      fork) api POST "/api/session/$1/fork" '{}' | jq -r '.data.id // .' ;;
-      interrupt) api POST "/api/session/$1/interrupt" | jq -c . ;;
+      fork) api POST "/api/session/$1/fork" '{}' | jq -r "$ESC_DEFS"'(.data.id // .) | if type=="string" then escfull else (tojson|esctext) end' ;;
+      interrupt) api POST "/api/session/$1/interrupt" | jq -r "$ESC_DEFS"'tojson|esctext' ;;
     esac ;;
-  diff) api GET "/api/session/${1:?sid}/diff" ;;
-  info) api GET "/api/session/${1:?sid}" | jq -c '.data|{id,title,agent,model,cost,tokens,time}' ;;
+  diff) api GET "/api/session/${1:?sid}/diff" | jq -Rrs "$ESC_DEFS"'esctext' ;;
+  info) api GET "/api/session/${1:?sid}" | jq -ac '.data|{id,title,agent,model,cost,tokens,time}' ;;
+  permissions)
+    [ $# -eq 1 ] || die "permissions SID [--force]"
+    valid_id "$1" || die "invalid session id"
+    owned_session "$1" "$force" >/dev/null || exit $?
+    list=$(api GET "/api/session/$(enc "$1")/permission") || die "could not list permission requests for $1"
+    printf '%s' "$list" | jq -e --arg sid "$1" 'if type!="object" then false
+      elif (.data|type)!="array" then false
+      else all(.data[]; type=="object" and ((.id|type)=="string") and ((.id|length)>0) and (.sessionID==$sid)) end' >/dev/null \
+      || die "malformed permission list response for session $1"
+    printf '%s' "$list" | jq -r "$ESC_DEFS"'def sj: tojson | gsub("(?<c>[\u007f-\u009f])"; (.c|explode[0]) as $n | "\\u" + ($n|hex4)); .data[]
+      |[((.id//"")|sj),((.action//"")|sj),((.resources//[])|sj),((.save//[])|sj)]|join("\t")' ;;
+  permission)
+    [ $# -eq 2 ] || die "permission SID REQUESTID [--force]"
+    valid_id "$1" && valid_id "$2" || die "invalid session or request id"
+    owned_session "$1" "$force" >/dev/null || exit $?
+    req=$(api GET "/api/session/$(enc "$1")/permission/$(enc "$2")") || die "permission request $2 not found in session $1"
+    printf '%s' "$req" | jq -e --arg sid "$1" --arg rid "$2" \
+      'if (.data|type)!="object" then false
+       elif ((.data.id//"")!=$rid) then false
+       elif ((.data.sessionID//"")!=$sid) then false
+       else true end' >/dev/null \
+      || die "permission request $2 does not belong to session $1"
+    printf '%s' "$req" | jq -r "$ESC_DEFS"'def sj: tojson | gsub("(?<c>[\u007f-\u009f])"; (.c|explode[0]) as $n | "\\u" + ($n|hex4)); .data
+      |"id: \(.id//"")",
+       "action: \((.action//"")|sj)",
+       "resources: \((.resources//[])|sj)",
+       "saved patterns (proposed): \((.save//[])|sj)"' ;;
+  reply)
+    [ $# -ge 3 ] || die "reply SID REQUESTID once|reject [--reject-all-pending] [--force]"
+    sid=$1 rid=$2 choice=$3; shift 3
+    reject_all=false
+    while [ $# -gt 0 ]; do case $1 in
+      --reject-all-pending) reject_all=true; shift;;
+      *) die "unknown flag $1";; esac; done
+    case $choice in once|reject) ;; *) die "choice must be once or reject";; esac
+    [ "$reject_all" != true ] || [ "$choice" = reject ] || die "--reject-all-pending is only valid with reject"
+    valid_id "$sid" && valid_id "$rid" || die "invalid session or request id"
+    owned_session "$sid" "$force" >/dev/null || exit $?
+    # Re-fetch the exact pending request and fail closed if it is stale/absent or
+    # does not belong to the supplied session, before any mutating POST.
+    req=$(api GET "/api/session/$(enc "$sid")/permission/$(enc "$rid")") \
+      || die "pending permission request $rid not found in session $sid; refusing"
+    printf '%s' "$req" | jq -e --arg sid "$sid" --arg rid "$rid" \
+      'if (.data|type)!="object" then false
+       elif ((.data.id//"")!=$rid) then false
+       elif ((.data.sessionID//"")!=$sid) then false
+       else true end' >/dev/null \
+      || die "pending permission request $rid does not belong to session $sid; refusing"
+    if [ "$choice" = reject ]; then
+      all=$(api GET "/api/session/$(enc "$sid")/permission") || die "could not list pending permission requests for $sid"
+      count=$(printf '%s' "$all" | jq -er 'if (.data|type)=="array" then (.data|length) else error("bad list") end') \
+        || die "could not determine pending permission count for $sid"
+      if [ "$reject_all" != true ]; then
+        die "reject rejects every pending request in session $sid (V2 fails all pending asks), including the $count currently pending; re-run with --reject-all-pending"
+      fi
+      echo "reject: $count pending request(s) in session $sid will be rejected (V2 rejects every pending ask)" >&2
+    fi
+    api POST "/api/session/$(enc "$sid")/permission/$(enc "$rid")/reply" \
+      "$(jq -cn --arg d "$choice" '{decision:$d}')" >/dev/null || die "reply POST failed"
+    echo "replied $choice to $rid in session $sid" ;;
   ""|-h|--help|help) usage ;;
   *) usage; exit 2 ;;
 esac
