@@ -59,8 +59,8 @@
     fsType = "nfs";
     options = [
       "noatime"
-      "rsize=8192"
-      "wsize=8192"
+      "rsize=1048576"
+      "wsize=1048576"
       "_netdev"
     ];
   };
@@ -96,12 +96,21 @@
     secretFile = config.sops.secrets."nextcloud-secret-file".path;
       # passwordsalt
     settings = {
-      overwriteProtocol = "https";
+      overwriteprotocol = "https";
       default_phone_region = "US";
       overwritehost = config.services.nextcloud.hostName;
       trusted_proxies = [ "147.182.139.226" "100.84.116.17" "45.33.94.83" "100.106.205.39" ];
-      overwrite.cli.url = "https://${config.services.nextcloud.hostName}";
+      # Quoted so the key stays flat ("overwrite.cli.url"); an unquoted dotted
+      # name nests into overwrite -> cli -> url, which Nextcloud does not read.
+      "overwrite.cli.url" = "https://${config.services.nextcloud.hostName}";
+      # Kept at 1 on purpose: files are written outside Nextcloud on the HDD mirror.
       filesystem_check_changes = 1;
+      # Cheaper previews: caps the largest generated size; existing previews are kept.
+      preview_max_x = 2048;
+      preview_max_y = 2048;
+      preview_max_scale_factor = 1;
+      # UTC hour; 06:00-10:00 UTC = 02:00-06:00 EDT. Heavy background jobs only.
+      maintenance_window_start = 6;
       # Connector settings that must survive rebuilds. allow_local_address lets
       # Nextcloud call the loopback Document Server; the scope is the ONLYOFFICE
       # app only, not every app's outbound requests.
@@ -120,19 +129,19 @@
     phpOptions."opcache.interned_strings_buffer" = "16";
   };
 
-  # One-time cleanup: a flat `overwrite.cli.url` key holding a stale .net value
-  # is left in config.php. The module merges config.php and does not remove keys
-  # it no longer owns, so delete that literal key once after nextcloud-setup.
-  # Remove this unit after one verified rebuild.
-  systemd.services.nextcloud-delete-stale-cli-url = {
-    description = "Delete stale flat overwrite.cli.url from Nextcloud config";
+  # Corrects a stale flat `overwrite.cli.url` (.net) left in config.php. The
+  # module merges config.php and does not remove keys it no longer owns. This
+  # unit SETS the flat key to the current host after each setup run. It must not
+  # delete the key: deleting after setup would remove the value Nix just wrote.
+  systemd.services.nextcloud-set-cli-url = {
+    description = "Set flat overwrite.cli.url to the current Nextcloud host";
     wantedBy = [ "multi-user.target" ];
     requires = [ "nextcloud-setup.service" ];
     after = [ "nextcloud-setup.service" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:system:delete overwrite.cli.url";
+      ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:system:set overwrite.cli.url --value=https://${config.services.nextcloud.hostName}";
     };
   };
 
