@@ -87,6 +87,11 @@
         upstream = "192.168.86.120:3000";
       };
 
+      "office.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.104:8100";
+      };
+
       "qbittorrent.montycasa.net" = { 
         protocol = "http"; 
         upstream = "192.168.86.114:8080"; 
