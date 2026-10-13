@@ -129,6 +129,14 @@
     phpOptions."opcache.interned_strings_buffer" = "16";
   };
 
+  # /mnt/drive is an NFS mount that holds config.php and the data directory.
+  # Without this ordering, nextcloud-setup can start before the mount completes,
+  # read the local directory under the mount point, and fail on boot.
+  systemd.services.nextcloud-setup = {
+    requires = [ "mnt-drive.mount" ];
+    after = [ "mnt-drive.mount" ];
+  };
+
   # Corrects a stale flat `overwrite.cli.url` (.net) left in config.php. The
   # module merges config.php and does not remove keys it no longer owns. This
   # unit SETS the flat key to the current host after each setup run. It must not
