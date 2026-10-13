@@ -129,6 +129,19 @@
     };
   };
 
+  # Catch-all for unknown Host headers. Nextcloud's trusted_domains check is
+  # bypassed while overwritehost is set (TrustedDomainHelper returns true), so
+  # reject unmatched names at nginx instead. Port 80 is open on the host, so
+  # this also covers direct connections that skip the bifrost proxy.
+  # Named vhosts (drive, theoffice) keep serving their own server_name.
+  services.nginx.virtualHosts."_unknown-host" = {
+    default = true;
+    serverName = "_";
+    locations."/" = {
+      return = "444";
+    };
+  };
+
   # OnlyOffice Document Server
   services.onlyoffice = {
     enable = true;
