@@ -102,6 +102,13 @@
       trusted_proxies = [ "147.182.139.226" "100.84.116.17" "45.33.94.83" "100.106.205.39" ];
       overwrite.cli.url = "https://${config.services.nextcloud.hostName}";
       filesystem_check_changes = 1;
+      # Connector settings that must survive rebuilds. allow_local_address lets
+      # Nextcloud call the loopback Document Server; the scope is the ONLYOFFICE
+      # app only, not every app's outbound requests.
+      onlyoffice = {
+        allow_local_address = true;
+        DocumentServerInternalUrl = "http://127.0.0.1:8100/";
+      };
       # trusted_domains = ["192.168.86.136"];
     };
     config = {
@@ -126,6 +133,52 @@
       Type = "oneshot";
       RemainAfterExit = true;
       ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:system:delete overwrite.cli.url";
+    };
+  };
+
+  # Gateway-only vhost for container-to-Nextcloud traffic. It listens only on
+  # the podman bridge gateway address, on plain HTTP, and only accepts the
+  # container network. It does not copy the Nextcloud vhost: it proxies over
+  # loopback to the public Nextcloud vhost, so the module's own location rules
+  # (denies for /data, /config, .ht*, fastcgi split) stay the single source.
+  # It adds no name to the public vhost, does not redirect to HTTPS, and does
+  # not widen what port 80 accepts from outside.
+  # Reading config.services.nginx.virtualHosts here recursed (this vhost is
+  # part of that attribute), so only the plain hostName string is used.
+  services.nginx.virtualHosts."container-gateway" = {
+    serverName = "host.containers.internal";
+    listen = [ { addr = "10.88.0.1"; port = 80; } ];
+    extraConfig = ''
+      allow 10.88.0.0/16;
+      deny all;
+    '';
+    # The Nextcloud vhost is plain HTTP on port 80 here; TLS terminates at the
+    # upstream proxy, so there is no 443 listener on this host to loop back to.
+    locations."/" = {
+      proxyPass = "http://127.0.0.1:80";
+      recommendedProxySettings = false;
+      extraConfig = ''
+        proxy_set_header Host ${config.services.nextcloud.hostName};
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 300s;
+        client_max_body_size 0;
+      '';
+    };
+  };
+
+  # Point ONLYOFFICE's StorageUrl at the gateway alias. The app-config value in
+  # the database takes precedence over system config, so a settings entry
+  # cannot change it. This oneshot writes it after each setup run. Rollback must
+  # reset it explicitly with occ; reverting this file alone leaves the value.
+  systemd.services.nextcloud-onlyoffice-storage-url = {
+    description = "Set ONLYOFFICE StorageUrl to the internal Nextcloud alias";
+    wantedBy = [ "multi-user.target" ];
+    requires = [ "nextcloud-setup.service" ];
+    after = [ "nextcloud-setup.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:app:set onlyoffice StorageUrl --value=http://host.containers.internal/";
     };
   };
 
@@ -171,12 +224,12 @@
       autoStart = true;
       # Host 8100 -> container 80 (the health-checked port in the smoke test).
       ports = [ "8100:80" ];
-      # The Document Server downloads files from Nextcloud via the storage
-      # address. Resolve Nextcloud's public name to the podman gateway (the
-      # host, on the container's own network) so the fetch stays local and
-      # does not depend on hairpin NAT. The Host header stays drive.montycasa.com,
-      # which Nextcloud already trusts.
-      extraOptions = [ "--add-host=drive.montycasa.com:10.88.0.1" ];
+      # Pin the gateway name to the bridge gateway that the container-gateway
+      # vhost listens on. Without the pin, podman may resolve the name to a
+      # LAN address instead. This name is set as StorageUrl by
+      # nextcloud-onlyoffice-storage-url, and renaming services.nextcloud.hostName
+      # does not touch it.
+      extraOptions = [ "--add-host=host.containers.internal:10.88.0.1" ];
       environmentFiles = [
         config.sops.templates."euro-office-env".path
       ];
