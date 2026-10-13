@@ -137,22 +137,6 @@
     after = [ "mnt-drive.mount" ];
   };
 
-  # Corrects a stale flat `overwrite.cli.url` (.net) left in config.php. The
-  # module merges config.php and does not remove keys it no longer owns. This
-  # unit SETS the flat key to the current host after each setup run. It must not
-  # delete the key: deleting after setup would remove the value Nix just wrote.
-  systemd.services.nextcloud-set-cli-url = {
-    description = "Set flat overwrite.cli.url to the current Nextcloud host";
-    wantedBy = [ "multi-user.target" ];
-    requires = [ "nextcloud-setup.service" ];
-    after = [ "nextcloud-setup.service" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:system:set overwrite.cli.url --value=https://${config.services.nextcloud.hostName}";
-    };
-  };
-
   # Gateway-only vhost for container-to-Nextcloud traffic. It listens only on
   # the podman bridge gateway address, on plain HTTP, and only accepts the
   # container network. It does not copy the Nextcloud vhost: it proxies over
