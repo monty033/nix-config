@@ -183,6 +183,24 @@
     };
   };
 
+  # Nextcloud's own server-side calls to Euro Office (healthcheck, command
+  # service, conversion) go straight to the container on the LAN. Browsers keep
+  # using the public DocumentServerUrl. Plain HTTP on 8100 is intentional: the
+  # container serves HTTP and TLS is terminated at local-proxy, so the internal
+  # leg has no certificate hostname to validate. The IP is hardcoded; if the
+  # Nextcloud host address changes, update this value.
+  systemd.services.nextcloud-onlyoffice-internal-url = {
+    description = "Set ONLYOFFICE DocumentServerInternalUrl to the LAN Euro Office address";
+    wantedBy = [ "multi-user.target" ];
+    requires = [ "nextcloud-setup.service" ];
+    after = [ "nextcloud-setup.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${config.services.nextcloud.occ}/bin/nextcloud-occ config:app:set onlyoffice DocumentServerInternalUrl --value=http://192.168.86.104:8100/";
+    };
+  };
+
   # Catch-all for unknown Host headers. Nextcloud's trusted_domains check is
   # bypassed while overwritehost is set (TrustedDomainHelper returns true), so
   # reject unmatched names at nginx instead. Port 80 is open on the host, so
