@@ -30,6 +30,8 @@ enc() { jq -rn --arg s "$1" '$s|@uri'; }
 # Output escaping for server-controlled text. escfull escapes every C0/DEL/C1 control;
 # esctext keeps tab and newline. Fields are escaped BEFORE joining, never with @tsv
 # afterwards (@tsv would re-escape the backslashes this adds).
+# SC2016: the jq program is deliberately single-quoted so $-variables stay jq's.
+# shellcheck disable=SC2016
 ESC_DEFS='def hex4: . as $n | [($n/4096|floor),(($n/256|floor)%16),(($n/16|floor)%16),($n%16)] | map("0123456789abcdef"[.:.+1]) | join(""); def escfull: tostring | gsub("(?<c>[\u0000-\u001f\u007f-\u009f])"; (.c|explode[0]) as $n | "\\u" + ($n|hex4)); def esctext: tostring | gsub("(?<c>[\u0000-\u0008\u000b-\u001f\u007f-\u009f])"; (.c|explode[0]) as $n | "\\u" + ($n|hex4));'
 
 # Deny-list attached to every free-model session (best effort, evolves over time).
@@ -179,7 +181,7 @@ case "$cmd" in
       |[((.id//"")|sj),((.action//"")|sj),((.resources//[])|sj),((.save//[])|sj)]|join("\t")' ;;
   permission)
     [ $# -eq 2 ] || die "permission SID REQUESTID [--force]"
-    valid_id "$1" && valid_id "$2" || die "invalid session or request id"
+    if ! valid_id "$1" || ! valid_id "$2"; then die "invalid session or request id"; fi
     owned_session "$1" "$force" >/dev/null || exit $?
     req=$(api GET "/api/session/$(enc "$1")/permission/$(enc "$2")") || die "permission request $2 not found in session $1"
     printf '%s' "$req" | jq -e --arg sid "$1" --arg rid "$2" \
@@ -202,7 +204,7 @@ case "$cmd" in
       *) die "unknown flag $1";; esac; done
     case $choice in once|reject) ;; *) die "choice must be once or reject";; esac
     [ "$reject_all" != true ] || [ "$choice" = reject ] || die "--reject-all-pending is only valid with reject"
-    valid_id "$sid" && valid_id "$rid" || die "invalid session or request id"
+    if ! valid_id "$sid" || ! valid_id "$rid"; then die "invalid session or request id"; fi
     owned_session "$sid" "$force" >/dev/null || exit $?
     # Re-fetch the exact pending request and fail closed if it is stale/absent or
     # does not belong to the supplied session, before any mutating POST.
