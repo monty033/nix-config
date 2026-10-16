@@ -769,6 +769,10 @@ in
       # the last independent fallback.
       plugins.enabled = [ "health-log" "hermes-mnemosyne" "claude-subscription-directsdk-experimental" ];
 
+      # Pin the web_extract backend explicitly rather than relying on
+      # autodetection. Keenable's extraction backend needs no API key.
+      web.extract_backend = "keenable";
+
       # The v0.19 migration is blocked in Nix-managed mode. Declare its schema
       # marker here; the disposable migration lab validated this is sufficient.
       _config_version = 33;
