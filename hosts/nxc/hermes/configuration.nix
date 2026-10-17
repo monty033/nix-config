@@ -484,6 +484,11 @@ in
 
   services.hermes-agent = {
     enable = true;
+    # Upstream v0.22.2 leaves the package version at its "0.0.0" default, which
+    # the install stamp records and the plugin loader's requires_hermes gate
+    # reads. Pin the release version so version-gated plugins (homeassistant
+    # requires >=0.21.5) load.
+    package = pkgs.hermes-agent.override { version = "0.22.2"; };
     addToSystemPackages = true;
     extraDependencyGroups = [ "messaging" "anthropic" "voice" "edge-tts" ];
 
