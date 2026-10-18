@@ -38,13 +38,6 @@ in
     mode = "0400";
   };
 
-  # Raw one-line Hermes Desktop session token for the remote client launcher.
-  # SOPS materializes a Murdock-local copy readable only by Patrick.
-  sops.secrets."hermes-desktop-session-token" = {
-    owner = "patrick";
-    mode = "0400";
-  };
-
   extra-services.desktop.enable = true;
   extra-services.tailscale.enable = true;
   extra-services.pbs-home-dirs.enable = true;
