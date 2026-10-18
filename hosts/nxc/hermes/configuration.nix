@@ -578,8 +578,8 @@ in
 
     settings = {
       # Default conversation model is Claude Haiku 5.5 through the subscription
-      # DirectSDK route. Its compaction trigger is 90k via compression.model_thresholds
-      # (see compression below), and other models keep the global 300k cap. GPT-6 Luna remains
+      # DirectSDK route. Its per-model compaction override is disabled for testing
+      # (see compression below), so it uses the global 300k cap like other models. GPT-6 Luna remains
       # the native delegation model and an explicit alias (luna); explicit
       # aliases preserve manual model selection when needed.
       model = {
@@ -860,13 +860,14 @@ in
         threshold = 0.85;
         # Global cap stays at 300k for every model: huge prefixes burn subscription
         # allowance, weaken focus, and are less cache-friendly than a compacted
-        # stable prefix. Haiku 5.5 is the one exception: model_thresholds below
-        # triggers it at 9% of its 1M window (90k). Luna, Sol, Sonnet, and Opus are
-        # unaffected. Revisit after measuring real Haiku usage.
+        # stable prefix. Haiku 5.5 per-model override is currently disabled (see
+        # model_thresholds below), so Haiku uses the global 300k cap like everything else.
         threshold_tokens = 300000;
-        model_thresholds = {
-          "claude-subscription-directsdk-experimental:claude-haiku-5-5" = 0.09;
-        };
+        # Haiku 5.5 limit disabled for testing (no per-model override; global 300k cap applies).
+        # To restore, uncomment the block below.
+        # model_thresholds = {
+        #   "claude-subscription-directsdk-experimental:claude-haiku-5-5" = 0.09;
+        # };
         target_ratio = 0.20;
         protect_last_n = 120;
         protect_first_n = 3;
