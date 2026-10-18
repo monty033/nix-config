@@ -169,6 +169,23 @@
       "hermes-dashboard.montycasa.net" = {
         protocol = "http";
         upstream = "100.81.254.49:9119";
+        extraRoutes = ''
+          # OS-owned App Links callback: never send code/state or Referer to
+          # access logs or the dashboard. No web landing page or fallback.
+          @androidCallback path /auth/native/android/callback
+          log_skip @androidCallback
+          respond @androidCallback 404
+
+          # Only this exact URL can reach the immutable association asset.
+          handle /.well-known/assetlinks.json {
+            header Content-Type application/json
+            root * ${./android-applinks}
+            rewrite * /assetlinks.json
+            file_server {
+              disable_canonical_uris
+            }
+          }
+        '';
       };
 
       # OpenCode v2 web UI. The server listens only on Hermes' Tailscale
