@@ -20,7 +20,7 @@ let
   '';
 
   # Generate config based on protocol type
-  mkConfig = { protocol, upstream, pathRewrite }:
+  mkConfig = { protocol, upstream, pathRewrite, extraRoutes }:
     let
       mkRoute = rewrite: ''
         route {
@@ -31,18 +31,14 @@ let
       '';
       mkHttp = rewrite:
         if rewrite != null && rewrite != "" then ''
-          ${cfTls}
           ${mkRoute rewrite}
         '' else ''
-          ${cfTls}
           reverse_proxy ${upstream}
         '';
       mkHttps = rewrite:
         if rewrite != null && rewrite != "" then ''
-          ${cfTls}
           ${mkRoute rewrite}
         '' else ''
-          ${cfTls}
           reverse_proxy ${upstream} {
             transport http {
               tls
@@ -50,10 +46,19 @@ let
             }
           }
         '';
-    in
-      if protocol == "http" then mkHttp pathRewrite
-      else if protocol == "https" then mkHttps pathRewrite
-      else throw "Protocol ${protocol} should be handled in layer4, not virtualHosts";
+      proxyConfig =
+        if protocol == "http" then mkHttp pathRewrite
+        else if protocol == "https" then mkHttps pathRewrite
+        else throw "Protocol ${protocol} should be handled in layer4, not virtualHosts";
+    in ''
+      ${cfTls}
+      ${if extraRoutes == "" then proxyConfig else ''
+        route {
+          ${extraRoutes}
+          ${proxyConfig}
+        }
+      ''}
+    '';
 
   # Generate layer4 config for SNI-based services
   mkLayer4SniConfig = domain: { protocol, upstream }: ''
@@ -97,6 +102,14 @@ in
               Optional URL prefix to 301-redirect traffic to. When set, requests
               to the bare hostname are permanently redirected to the given
               target, and all other requests are proxied normally.
+            '';
+          };
+          extraRoutes = mkOption {
+            type = types.lines;
+            default = "";
+            description = ''
+              Optional Caddy route directives executed before the normal proxy
+              inside an ordered route block. TLS remains at site scope.
             '';
           };
         };
@@ -187,7 +200,7 @@ in
       '';
       
       virtualHosts = mapAttrs (domain: config: {
-        extraConfig = mkConfig { inherit (config) protocol upstream pathRewrite; };
+        extraConfig = mkConfig { inherit (config) protocol upstream pathRewrite extraRoutes; };
       }) httpServices;
     };
 
