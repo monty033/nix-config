@@ -402,7 +402,7 @@ class FamilyCalendarRouterTests(unittest.TestCase):
         finally:
             setattr(router, "LINA_ICAL_URL_FILE", original)
 
-    def test_route_untagged_event_to_family(self):
+    def test_route_untagged_event_is_skipped(self):
         event = {
             "uid": "untagged@example.com",
             "summary": "Family dinner",
@@ -411,7 +411,28 @@ class FamilyCalendarRouterTests(unittest.TestCase):
             "rrule": None,
         }
         calendars = router.route_events([event])
-        self.assertEqual(calendars["family"], [event])
+        self.assertEqual(sum(len(events) for events in calendars.values()), 0)
+        self.assertNotIn("family", calendars)
+
+    def test_untagged_event_does_not_leak_into_tagged_routing(self):
+        untagged = {
+            "uid": "untagged2@example.com",
+            "summary": "Birthday party",
+            "description": "",
+            "start": datetime.now(timezone.utc),
+            "rrule": None,
+        }
+        tagged = {
+            "uid": "tagged@example.com",
+            "summary": "Piano #lina",
+            "description": "",
+            "start": datetime.now(timezone.utc),
+            "rrule": None,
+        }
+        calendars = router.route_events([untagged, tagged])
+        self.assertEqual(calendars["lina"], [tagged])
+        self.assertNotIn(untagged, calendars.get("family", []))
+        self.assertEqual(sum(len(events) for events in calendars.values()), 1)
     def test_scp_to_ha_preserves_unrelated_feeds_on_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

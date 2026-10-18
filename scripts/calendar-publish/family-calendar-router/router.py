@@ -7,7 +7,7 @@ Ingests source calendars (Proton iCal, Google Calendar, SDST school iCal),\npars
 Hashtags: #patrick #lina #aleandra #emma #isabella #juliana
 
 Routing:
-  0 hashtags → Family calendar
+  0 hashtags → skipped (no calendar)
   1 hashtag  → that person's calendar
   2+ hashtags → Family calendar + each tagged person's calendar
 
@@ -242,8 +242,8 @@ def route_events(events: list[dict]) -> dict[str, list[dict]]:
         )
 
         if len(tags) == 0:
-            # No hashtags — Family calendar
-            calendars["family"].append(event)
+            # Untagged events are skipped: no calendar receives them.
+            continue
         elif len(tags) == 1:
             person = list(tags)[0]
             calendars[person].append(event)
@@ -591,8 +591,7 @@ def fetch_school() -> list[dict]:
         return []
 
     # Auto-tag and retain only matching events. Untagged school events must
-    # not flow into route_events(), where untagged events intentionally go to
-    # the Family calendar.
+    # not flow into route_events(), where untagged events are skipped.
     selected_events = []
     seen_event_keys: set[tuple[str, str, str, str]] = set()
     for event in all_events:
@@ -833,7 +832,7 @@ def main():
         display = FAMILY_MEMBERS.get(name, "Family")
         print(f"  {display:12} {len(events):4} events", file=sys.stderr)
 
-    # Count untagged upcoming events (routed to Family)
+    # Count untagged upcoming events (skipped, not routed)
     now = datetime.now(timezone.utc)
     upcoming_untagged = 0
     for event in all_events:
@@ -847,7 +846,7 @@ def main():
         ):
             upcoming_untagged += 1
     if upcoming_untagged:
-        print(f"  {'untagged':12} {upcoming_untagged:4} events → Family", file=sys.stderr)
+        print(f"  {'untagged':12} {upcoming_untagged:4} events → skipped", file=sys.stderr)
     print(file=sys.stderr)
 
     # Generate iCal files
