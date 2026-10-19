@@ -1293,6 +1293,8 @@ except Exception as e:
     environment = {
       HOME = "/var/lib/hermes";
       HERMES_HOME = "/var/lib/hermes/.hermes";
+      # Dashboard-spawned sessions need the same Mnemosyne closure as the gateway.
+      PYTHONPATH = mnemosynePythonPath;
     };
     serviceConfig = {
       User = "hermes";
