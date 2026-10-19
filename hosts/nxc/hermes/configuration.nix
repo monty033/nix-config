@@ -199,8 +199,9 @@ let
   # directory with no PYTHONPATH changes), so no extraPythonPackages entry is
   # needed. Runtime prerequisite is the `claude` CLI — provided above as
   # claudeCodeForHermes — alongside the hermes user's existing subscription.
-  # It is the active default route (model.default / model.provider in the
-  # settings block below) and the source of the Claude availability fallbacks.
+  # It provides the Claude aliases and the availability fallbacks configured
+  # below; the active default route (model.default / model.provider in the
+  # settings block) now runs on a different provider.
   claudeSubscriptionDirectsdkSrc = pkgs.fetchFromGitHub {
     owner = "NousResearch";
     repo = "hermes-plugin-claude-subscription-directsdk";
@@ -557,9 +558,10 @@ in
       mnemosyneHermesPlugin
       homeAssistantHermesPlugin
       sessionResetPolicyHermesPlugin
-      # Claude Pro/Max via the official Claude Code CLI. Provides the default
-      # conversation route (model.default / model.provider) and the Claude
-      # fallbacks; Codex stays as the last, independent fallback.
+      # Claude Pro/Max via the official Claude Code CLI. The default
+      # conversation route now runs on the OpenCode Go provider, so this plugin
+      # supplies the subscription fallback route and the Claude aliases;
+      # Codex stays as the last, independent fallback.
       claudeSubscriptionDirectsdkPlugin
     ];
     # The subscription model-provider plugin resolves its transport by looking
@@ -577,14 +579,15 @@ in
     ];
 
     settings = {
-      # Default conversation model is Claude Haiku 5.5 through the subscription
-      # DirectSDK route. Its per-model compaction override is disabled for testing
-      # (see compression below), so it uses the global 300k cap like other models. GPT-6 Luna remains
+      # Default conversation model is DeepSeek V4.1 Flash through the OpenCode Go
+      # provider. No per-model compaction override is declared for it (see
+      # compression below), so it uses the global 300k cap like other models —
+      # deliberately short of its 1M window. GPT-6 Luna remains
       # the native delegation model and an explicit alias (luna); explicit
       # aliases preserve manual model selection when needed.
       model = {
-        default = "claude-haiku-5-5";
-        provider = "claude-subscription-directsdk-experimental";
+        default = "deepseek-v4.1-flash";
+        provider = "opencode-go";
         # Luna's actual reasoning level is set via agent.reasoning_overrides
         # below ("gpt-6-luna" = "high"), not here — `model.reasoning_effort`
         # is not a recognized key in this section's schema and was a dead
@@ -630,10 +633,10 @@ in
         idle_minutes = 2880;
       };
 
-      # Fallbacks are availability routes, not quality routing. Claude is the
-      # default route, so the first entry (Sonnet) stays on the same subscription
-      # provider. The last entry is Codex (GPT-6 Luna), an independent provider,
-      # so a Claude-subscription outage still has a non-Claude backup.
+      # Fallbacks are availability routes, not quality routing. The default
+      # route runs on a different provider, so these entries are the two
+      # independent backups: Sonnet on the subscription provider, then Codex
+      # (GPT-6 Luna) on its own, so an outage of either leaves one route open.
       fallback_providers = [
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
         { provider = "openai-codex"; model = "gpt-6-luna"; }
@@ -791,9 +794,9 @@ in
       # Voice requests get Home Assistant plus one narrow health write action.
       # They never receive generic file, shell, browser, or Google tools.
       platform_toolsets.api_server = [ "homeassistant" "health_log" ];
-      # claude-subscription-directsdk-experimental provides the default Claude
-      # Pro route, its aliases, and the Claude fallbacks; openai-codex remains
-      # the last independent fallback.
+      # claude-subscription-directsdk-experimental provides the Claude aliases
+      # and the subscription fallbacks; openai-codex remains the last
+      # independent fallback.
       plugins.enabled = [
         "health-log"
         "hermes-mnemosyne"
@@ -832,10 +835,11 @@ in
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
         # Luna is the native delegation model and explicitly uses high here;
-        # Haiku (default conversation model) also uses high, matching Luna.
+        # the default conversation model (DeepSeek V4.1 Flash) also uses high.
         # The general route baseline remains medium, as does Sol by inheritance.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
+          "deepseek-v4.1-flash" = "high";
           "claude-haiku-5-5" = "high";
           "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
@@ -858,8 +862,8 @@ in
         # across the rewrite, so gateway routing, /goal, and session_search
         # stay coherent across long topic sessions.
         threshold = 0.85;
-        # Global cap stays at 300k for every model: huge prefixes burn subscription
-        # allowance, weaken focus, and are less cache-friendly than a compacted
+        # Global cap stays at 300k for every model: huge prefixes burn allowance,
+        # weaken focus, and are less cache-friendly than a compacted
         # stable prefix. Haiku 5.5 per-model override is currently disabled (see
         # model_thresholds below), so Haiku uses the global 300k cap like everything else.
         threshold_tokens = 300000;
@@ -979,7 +983,7 @@ in
         };
 
         # Voice Assistant endpoint. Keep the latency-sensitive route on Luna
-        # without changing the Sol default for Telegram and other clients.
+        # without changing the configured default route for other clients.
         api_server = {
           enabled = true;
           extra = {
