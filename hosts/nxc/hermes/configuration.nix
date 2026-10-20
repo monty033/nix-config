@@ -1092,6 +1092,11 @@ in
     # expose the Nix-built plugin at the canonical `mnemosyne` path instead of
     # relying on the mutable user-installed wrapper.
     "L+ /var/lib/hermes/.hermes/plugins/mnemosyne - - - - ${mnemosyneHermesPlugin}"
+    # The startup migration check looks for plugins/homeassistant by directory
+    # name; the module's link is nix-managed-homeassistant-hermes-plugin. This
+    # adds the canonical name at the same store path. L+ replaces anything
+    # already at this path, so do not install a manual copy there.
+    "L+ /var/lib/hermes/.hermes/plugins/homeassistant - - - - ${homeAssistantHermesPlugin}"
     "d /var/lib/hermes/.hermes/mnemosyne/data 0750 hermes users -"
     "d /var/lib/hermes/.hermes/mnemosyne/data/shared 0750 hermes users -"
     # Tighten existing SQLite files as well as files created under UMask=0077.
