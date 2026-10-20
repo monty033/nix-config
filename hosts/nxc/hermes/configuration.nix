@@ -491,7 +491,7 @@ in
     # requires >=0.21.5) load.
     package = pkgs.hermes-agent.override { version = "0.22.2"; };
     addToSystemPackages = true;
-    extraDependencyGroups = [ "messaging" "anthropic" "voice" "edge-tts" ];
+    extraDependencyGroups = [ "messaging" "anthropic" "voice" ];
 
     # mcpServers.forgejo = {
     #   url = "http://192.168.86.120:8080/sse";
@@ -620,9 +620,15 @@ in
         orchestrator_enabled = true;
       };
 
+      # MiniMax TTS on the global endpoint (api.minimax.io). The credential is
+      # MINIMAX_API_KEY, which the service already receives from the
+      # openclaw-env secret file; no additional sops entry is required.
+      # tts.minimax.region is deliberately omitted: the resolver selects
+      # "global" when only the global credential variable is present.
       tts = {
-        provider = "edge";
-        edge.voice = "en-GB-RyanNeural";
+        provider = "minimax";
+        minimax.model = "speech-02-hd";
+        minimax.voice_id = "English_PatientMan";
       };
 
       # Reset gateway sessions after 48h of inactivity so topic conversations
