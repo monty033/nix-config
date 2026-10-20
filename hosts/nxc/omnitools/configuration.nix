@@ -7,7 +7,7 @@
   ];
 
   environment.systemPackages = with pkgs; [
-    
+
   ];
 
   extra-services.tailscale = {
@@ -15,7 +15,7 @@
     lxc = true;
   };
   extra-services.host-checkin.enable = true;
-  
+
   services.openssh.enable = true;
 
   virtualisation.containers.enable = true;

@@ -7,9 +7,9 @@
     ../../users/patrick/hosts/nix-fury
     # ../../secrets
   ];
-	
+
   environment.systemPackages = with pkgs; [
-		ansible
+    ansible
     # ansible-lint
     terraform
     sshpass
@@ -26,7 +26,7 @@
     mode = "0400";
   };
 
-  
+
   sops.secrets."mollysocket-vapid" = {
     owner = "mollysocket";
     mode = "0400";
@@ -90,7 +90,7 @@
 
   services.mollysocket = {
     enable = true;
-    settings = { 
+    settings = {
       host = "0.0.0.0";
       port = 8020;
       allowed_endpoints = [ "https://drive.montycasa.com" ];
@@ -118,7 +118,7 @@
 
   extra-services.proxmox-storage-monitor = {
     enable = true;
-    
+
     proxmoxHosts = [
       {
         name = "stark";
@@ -142,26 +142,15 @@
       #   tokenSecretFile = config.sops.secrets."proxmox-storage-monitoring-tokenSecret".path;
       # }
     ];
-    
+
     gotify = {
       url = "https://notify.montycasa.com";
       tokenFile = config.sops.secrets."proxmox-storage-montoring-gotify-token".path;
     };
-    
+
     storageThreshold = 80;
     checkInterval = "hourly";
   };
-
-  # extra-services.simplex-relay = {
-  #   enable = true;
-  #   # Generate a random obscure hostname and set it here
-  #   # For example: smp7a3f9e2b.montycasa.com
-  #   # Run: echo "smp$(openssl rand -hex 4).montycasa.com" to generate
-  #   host = "smp28.montycasa.com";  # Set this to your obscure hostname after generating
-  #   port = 5223;
-  #   # Don't open public firewall - only accessible via Tailscale from bifrost
-  #   openFirewall = false;
-  # };
 
   networking.firewall.allowedTCPPorts = [ 8080 3001 5216 ];
 

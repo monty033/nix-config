@@ -6,9 +6,9 @@
     (modulesPath + "/virtualisation/proxmox-lxc.nix")
     # ../../secrets
   ];
-	
+
   environment.systemPackages = with pkgs; [
-		
+
   ];
 
   # List services that you want to enable:

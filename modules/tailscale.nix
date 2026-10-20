@@ -41,11 +41,11 @@ in {
       description = "Use the ephemeral auth key instead of the standard auth key";
     };
   };
-  
+
   imports = [
     ../secrets
   ];
-  
+
   config = mkIf cfg.enable {
     sops = {
       secrets = {
@@ -150,7 +150,7 @@ in {
     # Non-LXC DNS configuration uses standard networking options
     networking.nameservers = mkIf (!cfg.lxc) [ "100.100.100.100" "1.1.1.1" ];
     networking.search = mkIf (!cfg.lxc) [ "skink-galaxy.ts.net" ];
-    
+
     # Fix for local network routing conflict with Tailscale in LXC
     # Timer to periodically check and remove the route
     systemd.timers.fix-tailscale-local-routing = mkIf cfg.lxc {

@@ -173,7 +173,7 @@ in
       enable = true;
       package = caddyWithPlugins;
       environmentFile = cfg.cloudflareTokenFile;
-      
+
       globalConfig = ''
         ${optionalString hasSniServices ''
           # When using layer4, Caddy's HTTPS needs to listen on alternate port
@@ -198,7 +198,7 @@ in
         ''}
         ${cfg.extraGlobalConfig}
       '';
-      
+
       virtualHosts = mapAttrs (domain: config: {
         extraConfig = mkConfig { inherit (config) protocol upstream pathRewrite extraRoutes; };
       }) httpServices;

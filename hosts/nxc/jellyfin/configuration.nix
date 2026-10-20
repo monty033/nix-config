@@ -34,7 +34,7 @@
     lxc = true;
   };
   extra-services.host-checkin.enable = true;
-  
+
   services.openssh.enable = true;
 
   services.jellyfin = {
@@ -51,13 +51,13 @@
     videoProcessing = true;
   };
 
-  nixpkgs.config.packageOverrides = pkgs: {  
+  nixpkgs.config.packageOverrides = pkgs: {
     intel-vaapi-driver = pkgs.intel-vaapi-driver.override { enableHybridCodec = true; };
   };
   # Set the VAAPI driver to use the newer iHD driver
   systemd.services.jellyfin.environment.LIBVA_DRIVER_NAME = "iHD";
   environment.sessionVariables = { LIBVA_DRIVER_NAME = "iHD"; };
-  
+
   networking.firewall.allowedTCPPorts = [ 8096 ];
 
   system.stateVersion = "25.05";

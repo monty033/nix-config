@@ -99,7 +99,7 @@
           "--health-start-period=10s"
         ];
       };
-      
+
       endurain = {
         image = "ghcr.io/endurain-project/endurain:v0.17.7";
         autoStart = true;

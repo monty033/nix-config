@@ -9,7 +9,7 @@
     [ # Include the results of the hardware scan.
       ./hardware-configuration.nix
     ];
-  
+
   environment.systemPackages = with pkgs; [
     inetutils
     mtr
@@ -47,7 +47,7 @@
     enable = true;
    #  permitRootLogin = "yes";
   };
-  
+
   sops.secrets.cloudflare-api-token = {
     owner = "caddy";
     mode = "0400";
@@ -56,32 +56,32 @@
   extra-services.caddy-proxy = {
     enable = true;
     cloudflareTokenFile = config.sops.secrets.cloudflare-api-token.path;
-    
+
     services = {
-      
+
       "drive.montycasa.com" = {
-        protocol = "http"; 
-        upstream = "http://nextcloud:80"; 
+        protocol = "http";
+        upstream = "http://nextcloud:80";
       };
 
       "hass.montycasa.com" = {
-        protocol = "http"; 
-        upstream = "http://homeassistant:8123"; 
+        protocol = "http";
+        upstream = "http://homeassistant:8123";
       };
 
       "photos.montycasa.com" = {
-        protocol = "http"; 
-        upstream = "http://immich:2283"; 
+        protocol = "http";
+        upstream = "http://immich:2283";
       };
 
-      "audiobooks.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://audiobookshelf:13378"; 
+      "audiobooks.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://audiobookshelf:13378";
       };
 
-      "keep.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://karakeep:3000"; 
+      "keep.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://karakeep:3000";
       };
 
       "mealie.montycasa.com" = {
@@ -94,9 +94,9 @@
         upstream = "http://mattermost:8065";
       };
 
-      "auth.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://pocket-id:1411"; 
+      "auth.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://pocket-id:1411";
       };
 
       "theoffice.montycasa.com" = {
@@ -109,34 +109,34 @@
         upstream = "http://nextcloud:8100";
       };
 
-      "endurain.montycasa.com" = { 
+      "endurain.montycasa.com" = {
         protocol = "http";
-        upstream = "http://endurain:8080"; 
+        upstream = "http://endurain:8080";
       };
 
-      "fit.montycasa.com" = { 
+      "fit.montycasa.com" = {
         protocol = "http";
-        upstream = "http://endurain:8080"; 
+        upstream = "http://endurain:8080";
       };
 
-      "jellyfin.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://jellyfin:8096"; 
+      "jellyfin.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://jellyfin:8096";
       };
 
-      "watchit.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://jellyfin:8096"; 
+      "watchit.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://jellyfin:8096";
       };
 
-      "notify.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://nix-fury:8080"; 
+      "notify.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://nix-fury:8080";
       };
 
-      "mollysocket.montycasa.com" = { 
-        protocol = "http"; 
-        upstream = "http://nix-fury:8020"; 
+      "mollysocket.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://nix-fury:8020";
       };
 
       "ln.montybitcoin.com" = {
@@ -209,7 +209,7 @@
   # services.xserver.enable = true;
 
 
-  
+
 
   # Configure keymap in X11
   # services.xserver.xkb.layout = "us";

@@ -7,7 +7,7 @@
   ];
 
   environment.systemPackages = with pkgs; [
-    
+
   ];
 
   extra-services.tailscale = {
@@ -15,7 +15,7 @@
     lxc = true;
   };
   extra-services.host-checkin.enable = true;
-  
+
   services.openssh.enable = true;
 
   services.pocket-id = {
@@ -29,7 +29,7 @@
   };
 
   networking.firewall.allowedTCPPorts = [ 8000 ];
-  
+
 
   system.stateVersion = "25.05";
 }

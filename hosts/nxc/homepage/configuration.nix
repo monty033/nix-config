@@ -53,7 +53,7 @@ in
     allowedHosts = "192.168.86.118:8082,homepage.skink-galaxy.ts.net:8082,homepage.montycasa.net";
     environmentFile = config.sops.secrets."homepage-dashboard-env".path;
     openFirewall = true;
-    
+
     settings = {
       title = "Monty Casa Homelab";
       favicon = "/images/monty-casa-crest.svg";

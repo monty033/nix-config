@@ -14,7 +14,7 @@ in
     enable = true;
     lxc = true;
   };
-  
+
   services.openssh.enable = true;
 
   sops.secrets.erpnext-mariadb-root-password = {};
@@ -89,7 +89,7 @@ in
 
   virtualisation.oci-containers = {
     backend = "podman";
-    
+
     containers = {
       erpnext-mariadb = {
         image = "mariadb:10.6";
@@ -274,7 +274,7 @@ in
       echo "Username: Administrator"
       echo "Password: $ADMIN_PASSWORD"
     '')
-    
+
     (writeScriptBin "erpnext-backup" ''
       #!/usr/bin/env bash
       SITE_NAME=''${1:-erpnext.local}
@@ -284,7 +284,7 @@ in
       echo "Backup completed. Files stored in ${dataDir}/sites/$SITE_NAME/private/backups/"
     '')
   ];
-  
+
 
   system.stateVersion = "25.05";
 }

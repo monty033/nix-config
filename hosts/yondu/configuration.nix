@@ -7,7 +7,7 @@
   ];
 
   environment.systemPackages = with pkgs; [
-    
+
   ];
 
   extra-services.tailscale = {
@@ -15,7 +15,7 @@
     lxc = true;
   };
   extra-services.host-checkin.enable = true;
-  
+
   services.openssh.enable = true;
 
   systemd.tmpfiles.rules = [
@@ -73,7 +73,7 @@
 
   virtualisation.oci-containers = {
     backend = "podman";
-    
+
     containers = {
       gluetun = {
         image = "qmcgaw/gluetun";

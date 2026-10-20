@@ -207,7 +207,7 @@
   # swapDevices removed to prevent duplicate entry error
 
   services = {
-    
+
     power-profiles-daemon.enable = true;
 
     # Use TLP or power-profiles-daemon

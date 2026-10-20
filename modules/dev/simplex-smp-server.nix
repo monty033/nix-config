@@ -65,23 +65,23 @@ in
     # Enable the OCI container for SimpleX relay
     virtualisation.oci-containers = {
       backend = "podman";
-      
+
       containers.simplex-relay = {
         image = cfg.image;
-        
+
         ports = [
           "${toString cfg.port}:5223"
         ];
-        
+
         volumes = [
           "${cfg.dataDir}/config:/etc/opt/simplex"
           "${cfg.dataDir}/logs:/var/opt/simplex"
         ];
-        
-        environmentFiles = 
+
+        environmentFiles =
           (optional (cfg.environmentFile != null) cfg.environmentFile)
           ++ cfg.environmentFiles;
-        
+
         autoStart = cfg.autoStart;
       };
     };

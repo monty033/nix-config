@@ -7,7 +7,7 @@
   ];
 
   environment.systemPackages = with pkgs; [
-    
+
   ];
 
   extra-services.tailscale = {
@@ -24,97 +24,97 @@
   extra-services.caddy-proxy = {
     enable = true;
     cloudflareTokenFile = config.sops.secrets.cloudflare-api-token.path;
-    
+
     services = {
-      
-      "stark.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "192.168.86.93:8006"; 
-      };
-      
-      "starlord.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "192.168.86.95:8006"; 
+
+      "stark.montycasa.net" = {
+        protocol = "https";
+        upstream = "192.168.86.93:8006";
       };
 
-      "loki.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "192.168.86.97:8006"; 
+      "starlord.montycasa.net" = {
+        protocol = "https";
+        upstream = "192.168.86.95:8006";
       };
 
-      "wakanda.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "100.122.26.79:8006"; 
+      "loki.montycasa.net" = {
+        protocol = "https";
+        upstream = "192.168.86.97:8006";
       };
 
-      "pbs.montycasa.net" = { 
-        protocol = "https"; 
+      "wakanda.montycasa.net" = {
+        protocol = "https";
+        upstream = "100.122.26.79:8006";
+      };
+
+      "pbs.montycasa.net" = {
+        protocol = "https";
         upstream = "192.168.86.123:8007";
       };
 
-      "truenas.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "192.168.86.99:443"; 
+      "truenas.montycasa.net" = {
+        protocol = "https";
+        upstream = "192.168.86.99:443";
       };
 
-      "bucky.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "100.118.191.95:443"; 
+      "bucky.montycasa.net" = {
+        protocol = "https";
+        upstream = "100.118.191.95:443";
       };
 
-      "uptime.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.106:3001"; 
+      "uptime.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.106:3001";
       };
 
-      "omada.montycasa.net" = { 
-        protocol = "https"; 
-        upstream = "192.168.86.135:8043"; 
+      "omada.montycasa.net" = {
+        protocol = "https";
+        upstream = "192.168.86.135:8043";
       };
 
-      "router.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.1:80"; 
+      "router.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.1:80";
       };
-      
+
       "blocker.montycasa.net" = {
-        protocol = "http"; 
-        upstream = "192.168.86.1:3000"; 
+        protocol = "http";
+        upstream = "192.168.86.1:3000";
       };
-      
+
       "git.montycasa.net" = {
         protocol = "http";
         upstream = "192.168.86.120:3000";
       };
 
-      "qbittorrent.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.114:8080"; 
+      "qbittorrent.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.114:8080";
       };
 
-      "radarr.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.114:7878"; 
+      "radarr.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.114:7878";
       };
 
-      "sonarr.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.114:8989"; 
+      "sonarr.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.114:8989";
       };
 
-      "bazarr.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.114:6767"; 
+      "bazarr.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.114:6767";
       };
 
-      "prowlarr.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.114:9696"; 
+      "prowlarr.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.114:9696";
       };
-      
-      "youtarr.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.114:3087"; 
+
+      "youtarr.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.114:3087";
       };
 
       # MinusPod is intentionally reachable through the local/Tailscale proxy only.
@@ -123,39 +123,39 @@
         upstream = "100.121.147.57:8000";
       };
 
-      "frigate.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.116:5000"; 
+      "frigate.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.116:5000";
       };
 
-      "dockge.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.112:5001"; 
+      "dockge.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.112:5001";
       };
 
-      "homepage.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.118:8082"; 
+      "homepage.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.118:8082";
       };
 
-      "paperless.montycasa.net" = { 
-        protocol = "http"; 
+      "paperless.montycasa.net" = {
+        protocol = "http";
         upstream = "192.168.86.133:28981";
       };
 
-      "myspeed.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.106:5216"; 
+      "myspeed.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.106:5216";
       };
 
-      "grist.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.132:8484"; 
+      "grist.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.132:8484";
       };
 
-      "syncthing.montycasa.net" = { 
-        protocol = "http"; 
-        upstream = "192.168.86.99:20910"; 
+      "syncthing.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.99:20910";
       };
 
       "search.montycasa.net" = {
@@ -226,8 +226,8 @@
   networking.firewall = {
     checkReversePath = "loose";
   };
-  
-  services.openssh.enable = true;  
+
+  services.openssh.enable = true;
 
   system.stateVersion = "25.05";
 }

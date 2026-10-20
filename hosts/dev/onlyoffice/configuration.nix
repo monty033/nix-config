@@ -13,7 +13,7 @@
           owner = "onlyoffice";
           group = "onlyoffice";
           mode = "0400";
-          
+
           # Restart the service when the secret changes
           restartUnits = [ "onlyoffice-docservice.service" ];
         };
@@ -21,25 +21,25 @@
     };
 
   environment.systemPackages = with pkgs; [
-    
+
   ];
 
   extra-services.tailscale = {
     enable = true;
     userspace-networking = true;
   };
-  
+
   services.openssh.enable = true;
 
   # services.onlyoffice = {
   #   enable = true;
   #   hostname = "theoffice.montycasa.com";
   #   jwtSecretFile = config.sops.secrets."onlyoffice-jwt-secret".path;
-  #   # postgresHost = "localhost"; 
+  #   # postgresHost = "localhost";
   # };
 
   networking.firewall.allowedTCPPorts = [ 8000 ];
-  
+
 
   system.stateVersion = "25.05";
 }

@@ -4,14 +4,14 @@ with lib;
 
 let
   cfg = config.extra-services.frigate;
-  
+
   # Python environment with OpenVino and model optimizer
   openvinoEnv = pkgs.python3.withPackages (ps: with ps; [
     openvino
     tensorflow
     numpy
   ]);
-  
+
   # Python script to convert the model using modern OpenVino API
   convertModelScript = pkgs.writeText "convert_ov_model.py" ''
     import openvino as ov
@@ -45,7 +45,7 @@ let
         print("Consider using a pre-converted OpenVino model or ONNX format")
         raise
   '';
-  
+
   # OpenVino model download and conversion script
   # This matches the Frigate Dockerfile approach
   setupOpenVino = pkgs.writeShellScript "setup-openvino" ''
@@ -217,7 +217,7 @@ in {
       description = "Setup OpenVino models for Frigate";
       wantedBy = [ "frigate.service" ];
       before = [ "frigate.service" ];
-      
+
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;

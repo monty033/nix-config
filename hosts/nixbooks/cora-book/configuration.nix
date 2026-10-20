@@ -2,7 +2,7 @@
 
 {
 
-  imports = [ 
+  imports = [
       ./hardware-configuration.nix
   ];
 
@@ -16,10 +16,10 @@
   fileSystems."/home" = {
     device = "/dev/disk/by-uuid/b665e92a-8ae2-4a9a-9cb1-ac984d759604";
     fsType = "ext4";
-    options = [ 
-      "defaults" 
-      "user_xattr" 
-      "acl" 
+    options = [
+      "defaults"
+      "user_xattr"
+      "acl"
       "noatime"        # Reduce write operations
       "commit=60"      # Commit changes every 60 seconds
     ];

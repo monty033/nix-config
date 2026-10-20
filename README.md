@@ -1,6 +1,6 @@
 # nix-config
 
-Personal NixOS homelab configuration managing 37 flake configurations across Proxmox LXC containers, servers, laptops, templates, development systems, and installation images. The primary package set tracks NixOS 26.05, with additional unstable and pinned inputs where required.
+Personal NixOS homelab configuration managing 40 flake configurations across Proxmox LXC containers, servers, laptops, templates, development systems, and installation images. The primary package set tracks NixOS 26.05, with additional unstable and pinned inputs where required.
 
 ## Prerequisites
 

@@ -64,7 +64,7 @@
       "_netdev"
     ];
   };
-     
+
   services.nextcloud = {
     enable = true;
     hostName = "drive.montycasa.com";

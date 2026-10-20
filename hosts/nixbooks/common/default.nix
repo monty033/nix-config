@@ -6,7 +6,7 @@
     enable = true;
     buildHost = "root@nix-fury";
   };
-  
+
   extra-services.host-checkin.enable = true;
   nix.settings.auto-optimise-store = true;
 
@@ -129,7 +129,7 @@
 
   # Enable the X11 windowing system.
   services.xserver.enable = true;
-  nixpkgs.config.allowUnfree = true;
+  # nixpkgs.config.allowUnfree is set in hosts/common/default.nix.
   hardware.bluetooth.enable = true;
 
   # Enable the Cinnamon Desktop Environment.
@@ -144,7 +144,7 @@
     nssmdns4 = true;
     openFirewall = true;
   };
-  
+
   # Fix for the pesky "insecure" broadcom
   nixpkgs.config.allowInsecurePredicate = pkg:
     builtins.elem (lib.getName pkg) [
