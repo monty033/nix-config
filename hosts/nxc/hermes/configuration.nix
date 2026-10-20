@@ -373,9 +373,12 @@ in
     [ config.services.hermes-agent.package ]
     ++ config.services.hermes-agent.extraPlugins
     # The Hermes module merges settings into mutable config.yaml during
-    # activation. Restart when the memory provider/settings change so a
+    # activation. Restart when the memory or voice settings change so a
     # provider cutover is effective without a manual systemctl command.
-    ++ [ (builtins.toJSON config.services.hermes-agent.settings.memory) ]
+    ++ [
+      (builtins.toJSON config.services.hermes-agent.settings.memory)
+      (builtins.toJSON config.services.hermes-agent.settings.tts)
+    ]
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
       # The identity file is installed at activation, but the gateway must
@@ -1261,6 +1264,35 @@ try:
 except Exception as e:
     print("hermes-prune-stale-haiku45-override: skipped: " + type(e).__name__, file=sys.stderr)
 ' "$hermes_cfg" || echo "hermes-prune-stale-haiku45-override: warning, continuing" >&2 || true
+      fi
+    '';
+
+  # One-time cleanup of a stale provider block. The upstream
+  # hermes-config-merge only adds and overwrites keys, so dropping tts.edge
+  # from the Nix source left the old block in the mutable config. This
+  # removes tts.edge only and is a no-op once the key is gone. Remove this
+  # block after one successful rebuild has verified the key is absent.
+  system.activationScripts.hermes-prune-stale-tts-edge =
+    lib.stringAfter [ "hermes-agent-setup" ] ''
+      hermes_cfg=/var/lib/hermes/.hermes/config.yaml
+      if [ -f "$hermes_cfg" ]; then
+        # Non-fatal: a failure here warns and never blocks activation.
+        ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -c '
+import sys, yaml
+from pathlib import Path
+p = Path(sys.argv[1])
+try:
+    data = yaml.safe_load(p.read_text())
+    if not isinstance(data, dict):
+        raise SystemExit(0)
+    tts = data.get("tts")
+    if isinstance(tts, dict) and "edge" in tts:
+        del tts["edge"]
+        p.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+        print("pruned stale tts.edge block")
+except Exception as e:
+    print("hermes-prune-stale-tts-edge: skipped: " + type(e).__name__, file=sys.stderr)
+' "$hermes_cfg" || echo "hermes-prune-stale-tts-edge: warning, continuing" >&2 || true
       fi
     '';
 
