@@ -605,6 +605,8 @@ in
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
           luna = "openai-codex/gpt-6-luna";
           sol = "openai-codex/gpt-6.1-sol";
+          mm = "minimax/MiniMax-M3.1-Flash";
+          flash = "opencode-go/deepseek-v4.1-flash";
         };
       };
 
