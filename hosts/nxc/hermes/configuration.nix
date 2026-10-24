@@ -632,8 +632,8 @@ in
       # "global" when only the global credential variable is present.
       tts = {
         provider = "minimax";
-        minimax.model = "speech-02-hd";
-        minimax.voice_id = "English_PatientMan";
+        minimax.model = "speech-2.8-hd";
+        minimax.voice_id = "English_WiseScholar";
       };
 
       # Reset gateway sessions after 48h of inactivity so topic conversations
