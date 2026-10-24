@@ -42,12 +42,12 @@
     };
 
     nix-hermes-agent = {
-      url = "github:NousResearch/hermes-agent/v0.22.2";
+      url = "github:NousResearch/hermes-agent/v0.22.4";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
 
     hermes-webui = {
-      url = "github:nesquena/hermes-webui/v0.52.113";
+      url = "github:nesquena/hermes-webui/v0.52.492";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
