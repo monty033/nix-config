@@ -471,6 +471,7 @@
           "--network=host"
           "--user=0:0"
           "--log-driver=journald"
+          "--pull=always"
         ];
         environment = {
           PYTHONUNBUFFERED = "1";
