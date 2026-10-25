@@ -33,12 +33,18 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main after PR #251. The response preflight now sizes
-    # a reply by its exact JSON bytes instead of charging every string at 6x,
-    # which lifts the practical note-read ceiling to the 65,536-byte frame.
-    # Everything merged between this pin and the previous one ships with it.
+    # Pinned to NookBridge main after PRs #252 and #253. #252 makes operator
+    # pagination usable: `nookctl notes browse` and `tree list` now print the
+    # cursor the daemon hands back, so every page after the first is reachable.
+    # #253 fixes note reads that have a title but no body: they used to be
+    # serialized as invalid, dropped with the connection, and reported to the
+    # caller as `service_unavailable`; they now return `contentStatus: "ok"`
+    # with an empty Markdown body. `allowEmpty` is scoped to the note-content
+    # call site, so the operator view/preimage projections still require a
+    # non-empty body. The 65,536-byte response frame and its exact JSON byte
+    # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=725d5ca653f8e7e5ba80277050c96e9ed294d3ae";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=2d067841b496243baaf2a6967eff30e52aa6f052";
       flake = false;
     };
 
