@@ -20,7 +20,39 @@ with lib; let
       ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-provision: must be run as root' >&2
       exit 77
     fi
-    exec ${pkgs.systemd}/bin/systemd-run \
+
+    # The transient unit takes the exclusive state lock in /var/lib/nookbridge,
+    # so the daemon must not hold it. Mirror the upstream systemd wrapper:
+    # suspend nookd while we own the state, restore its prior active state on
+    # every exit path, and activate it after a successful provision that found
+    # it inactive.
+    was_active=no
+    if ${pkgs.systemd}/bin/systemctl is-active --quiet nookd; then
+      was_active=yes
+    fi
+    restore() {
+      rc=$?
+      trap - EXIT
+      restore_failed=no
+      if [ "$was_active" = yes ] || [ "$rc" -eq 0 ]; then
+        if ! ${pkgs.systemd}/bin/systemctl start nookd; then
+          restore_failed=yes
+          ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-provision: failed to restore nookd.service' >&2 || true
+        fi
+      fi
+      # A real command failure keeps its own status; a failed restore must not
+      # be reported as success.
+      if [ "$restore_failed" = yes ] && [ "$rc" -eq 0 ]; then
+        exit 1
+      fi
+      exit "$rc"
+    }
+    trap restore EXIT
+    if [ "$was_active" = yes ]; then
+      ${pkgs.systemd}/bin/systemctl stop nookd
+    fi
+
+    ${pkgs.systemd}/bin/systemd-run \
       --quiet --wait --collect --pty \
       --unit=nookbridge-provision.service \
       --uid=nookbridge \
@@ -58,7 +90,36 @@ with lib; let
       ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-sync: must be run as root' >&2
       exit 77
     fi
-    exec ${pkgs.systemd}/bin/systemd-run \
+
+    # Fetch-only sync owns the exclusive state lock, so the daemon is suspended
+    # for the transient unit and restored to its prior state on every exit path.
+    # A sync that fails still restores the daemon, and the sync exit status is
+    # preserved unchanged.
+    was_active=no
+    if ${pkgs.systemd}/bin/systemctl is-active --quiet nookd; then
+      was_active=yes
+    fi
+    restore() {
+      rc=$?
+      trap - EXIT
+      restore_failed=no
+      if [ "$was_active" = yes ]; then
+        if ! ${pkgs.systemd}/bin/systemctl start nookd; then
+          restore_failed=yes
+          ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-sync: failed to restore nookd.service' >&2 || true
+        fi
+      fi
+      if [ "$restore_failed" = yes ] && [ "$rc" -eq 0 ]; then
+        exit 1
+      fi
+      exit "$rc"
+    }
+    trap restore EXIT
+    if [ "$was_active" = yes ]; then
+      ${pkgs.systemd}/bin/systemctl stop nookd
+    fi
+
+    ${pkgs.systemd}/bin/systemd-run \
       --quiet --wait --collect --pty \
       --unit=nookbridge-sync.service \
       --uid=nookbridge \

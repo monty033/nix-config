@@ -33,11 +33,12 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Repinned after NookBridge PR #191 merged: the read-only sync proof refuses
-    # an implicit state directory instead of passing against an empty store, so
-    # the operator sync wrapper must now name the store explicitly.
+    # Pinned to NookBridge main after PR #251. The response preflight now sizes
+    # a reply by its exact JSON bytes instead of charging every string at 6x,
+    # which lifts the practical note-read ceiling to the 65,536-byte frame.
+    # Everything merged between this pin and the previous one ships with it.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=89c26d208b0aadf68505db64397c74fa51a61f06";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=725d5ca653f8e7e5ba80277050c96e9ed294d3ae";
       flake = false;
     };
 

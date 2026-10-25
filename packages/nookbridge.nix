@@ -5,6 +5,9 @@
 , nodejs_22
 , openssl
 , pkg-config
+, stdenv
+, glibc
+, binutils
 , python3
 , inputs
 , zlib
@@ -48,6 +51,31 @@ buildNpmPackage rec {
   buildPhase = ''
     runHook preBuild
     npm run build
+
+    # The operator socket resolves peer credentials by exec'ing
+    # `<dist>/../../operator-peercred-helper` (see
+    # src/service/peer-credentials.ts). That binary must be fully static:
+    # glibc NSS, locale, and gconv data paths would otherwise point into the
+    # build host's /nix/store and be invalid on the target. Mirrors the
+    # compile line in .forgejo/workflows/linux-artifact.yml.
+    ${stdenv.cc}/bin/cc \
+      -O2 -std=c11 -Wall -Wextra -Werror -ffreestanding -fno-builtin \
+      -fno-stack-protector -fno-asynchronous-unwind-tables -fno-unwind-tables \
+      -fno-pie -no-pie -nostdlib -static -Wl,-e,_start -Wl,--build-id=none \
+      -L${glibc.static}/lib \
+      -o operator-peercred-helper native/operator-peercred.c
+
+    if ${binutils}/bin/readelf -l operator-peercred-helper \
+         | grep -E 'INTERP' >/dev/null; then
+      echo "operator-peercred-helper is dynamically linked" >&2
+      exit 1
+    fi
+    if ${binutils}/bin/strings operator-peercred-helper \
+         | grep -E '/nix/store/[[:alnum:]]|(^|[[:space:]])/build/|/tmp/nookbridge/|libnss_|gconv-modules|/usr/lib/locale|/etc/localtime' >/dev/null; then
+      echo "operator-peercred-helper contains a host or NSS/locale path" >&2
+      exit 1
+    fi
+
     runHook postBuild
   '';
 
@@ -58,6 +86,8 @@ buildNpmPackage rec {
     mkdir -p "$out/libexec/nookbridge"
     cp -r dist "$out/libexec/nookbridge/"
     cp -r node_modules "$out/libexec/nookbridge/"
+    install -Dm755 operator-peercred-helper \
+      "$out/libexec/nookbridge/operator-peercred-helper"
     install -Dm644 package.json "$out/libexec/nookbridge/package.json"
     install -Dm644 LICENSE "$out/share/licenses/nookbridge/LICENSE"
 
@@ -72,6 +102,21 @@ buildNpmPackage rec {
 
     makeWrapper ${nodejs_22}/bin/node "$out/bin/nookbridge-sync-cli" \
       --add-flags "$out/libexec/nookbridge/dist/sync.js"
+
+    # Do NOT install the bare `nookbridge-provision` / `nookbridge-sync` names
+    # here. modules/nookbridge.nix owns those names as privileged wrappers that
+    # enforce a root check, then re-exec through systemd-run with the service
+    # user/group, credentials and sandboxing. Shipping the same names from the
+    # package shadows them in the system path and silently bypasses all of that.
+
+    # Parity with the release artifact builder
+    # (scripts/build-linux-artifact.sh:235-236): the categorical liveness and
+    # runtime-check entrypoints ship as their own wrappers.
+    makeWrapper ${nodejs_22}/bin/node "$out/bin/nookbridge-health" \
+      --add-flags "$out/libexec/nookbridge/dist/health.js"
+
+    makeWrapper ${nodejs_22}/bin/node "$out/bin/nookbridge-runtime-check" \
+      --add-flags "$out/libexec/nookbridge/dist/runtime-check.js"
 
     # `nookctl` is the admin-only operator CLI. Stage 8 packages it
     # alongside the service binaries so the structural check and the
