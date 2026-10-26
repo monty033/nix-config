@@ -38,8 +38,7 @@ nfc:
 
 # Python unit tests. Hermetic: no network, no sudo, no host access.
 # Every suite here was verified passing without contacting live infrastructure.
-# Two suites are deliberately excluded, both failing on master before this recipe:
-#   test_dns_migration              one assertion fails (17 != 16 in the rendered plan)
+# One suite is excluded because it cannot pass in a plain shell:
 #   test_hermes_relay_plugin_import needs `requests`, which the devshell provides
 # Add a suite here only once it passes; a recipe that is red on arrival teaches
 # everyone to ignore it.
@@ -47,6 +46,7 @@ nfc:
 # run the hermetic Python unit tests
 test:
   python3 -m unittest \
+    tests.test_dns_migration \
     tests.test_nix_pr \
     tests.test_pihole_audit \
     tests.test_pihole_baseline \

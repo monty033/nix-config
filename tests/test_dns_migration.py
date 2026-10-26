@@ -19,9 +19,17 @@ class InventoryRenderingTests(unittest.TestCase):
         first = render_inventory.render(inventory)
         second = render_inventory.render(inventory)
         self.assertEqual(first, second)
-        self.assertEqual(len(first["networkReservations"]), 16)
+        # Counts follow the household inventory and change whenever a device is added,
+        # so assert the relationships that must hold rather than a snapshot number.
+        reservations = first["networkReservations"]
+        self.assertEqual(len(reservations), len(inventory["devices"]))
+        self.assertEqual({item["device"] for item in reservations}, set(inventory["devices"]))
+        self.assertEqual(len(first["piholeClients"]), len(reservations))
+        self.assertEqual(
+            first["unresolvedIdentityRefs"],
+            sorted({item["identityRef"] for item in reservations}),
+        )
         self.assertEqual(len(first["services"]), 0)
-        self.assertEqual(len(first["unresolvedIdentityRefs"]), 16)
         self.assertEqual(first["unboundHostOverrides"], [])
         self.assertEqual(first["unboundHostAliases"], [])
         self.assertEqual(first["ownership"]["dhcpv6"], "opnsense")
