@@ -334,7 +334,14 @@ in
   # Scope each port to the interface that actually needs it instead of
   # exposing all three on every network path into the host.
   #
-  networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 ];
+  # Hermes Webapp listener, reached by the local-proxy Caddy for the
+  # hermes.montycasa.net vhost. The listener accepts only a loopback or
+  # wildcard bind, so it also answers on the tailnet address; this route
+  # uses the LAN address for the proxy hop instead, which is why 9120 is
+  # opened here rather than on tailscale0. Nothing binds 9120 on the
+  # currently deployed version, so this port is opened ahead of the
+  # release that will use it.
+  networking.firewall.interfaces."eth0".allowedTCPPorts = [ 8642 8644 9120 ];
   # OpenCode v2 server (4096) is likewise reachable only over Tailscale.
   networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9119 4096 9130 ];
 

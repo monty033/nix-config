@@ -205,6 +205,19 @@
         upstream = "100.81.254.49:9130";
       };
 
+      # Hermes Webapp — the upstream release that serves the desktop
+      # workspace in a browser. Its listener lives in the agent's gateway
+      # on its own port, separate from the dashboard on 9119 (which an
+      # external app depends on, so that surface stays untouched).
+      # Upstream is the Hermes host's LAN address over the eth0 rule that
+      # host opens for 9120. Plain HTTP upstream: Caddy terminates TLS.
+      # Nothing binds 9120 on the currently deployed version, so this
+      # answers 502 today.
+      "hermes.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.126:9120";
+      };
+
       # Pi-hole admin/API web UIs — Gate 3B. local-proxy is reachable only
       # from the LAN and Tailscale; it proxies to LAN-only Pi-hole Web at
       # port 8080. Both Pi-holes use the SOPS-rendered API credential
