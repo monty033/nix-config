@@ -177,9 +177,19 @@ cameras:
         - dog
       filters:
         person:
+          # 0.18 requires the named-dict mask form; the legacy list form only
+          # survives because the config migration rewrites it. This file is
+          # rendered from a template and declares its config version, so that
+          # migration no longer runs and the list form fails validation.
           mask:
-            - 0.573,0.17,0.571,0.362,0.619,0.366,0.618,0.17
-            - 0.672,0.422,0.75,0.425,0.753,0.669,0.677,0.674
+            object_mask_1:
+              friendly_name: Object Mask 1 (person)
+              enabled: true
+              coordinates: 0.573,0.17,0.571,0.362,0.619,0.366,0.618,0.17
+            object_mask_2:
+              friendly_name: Object Mask 2 (person)
+              enabled: true
+              coordinates: 0.672,0.422,0.75,0.425,0.753,0.669,0.677,0.674
     zones:
       Back_Stoop:
         coordinates: 0.001,0.702,0,0,0.186,0,0.198,0.646,0.361,0.92,0.326,0.998,0.179,0.997,0.072,0.779
