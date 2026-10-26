@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -16,12 +17,19 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from nix_pr import (  # noqa: E402
+    NixPrError,
     Repository,
+    _rendered_config_paths,
+    _requires_second_review,
+    _run_rendered_config_validation,
+    _second_review_check,
     content_fingerprint,
+    frigate_image,
     is_substantive_change,
     load_receipt,
     missing_required_sections,
     receipt_path,
+    render_config_placeholders,
     validate_commit_message,
     write_receipt,
 )
@@ -213,6 +221,121 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertEqual(self.repo.staged_files(), ["README.md"])
         self.assertEqual(self.repo.unstaged_files(), ["README.md"])
         self.assertIn("new.md", self.repo.changed_files(self.repo.git("rev-parse", "HEAD").strip()))
+
+
+class RenderedConfigGateTests(unittest.TestCase):
+    """The gate that stops template changes from reaching a host unvalidated."""
+
+    def setUp(self) -> None:
+        self.repo_fixture = TemporaryGitRepository()
+        self.repo = Repository(self.repo_fixture.path)
+
+    def tearDown(self) -> None:
+        self.repo_fixture.close()
+
+    def test_classifies_rendered_deployment_configs(self) -> None:
+        changed = [
+            "hosts/nxc/frigate/frigate-config.yml",
+            "hosts/frigate/config.yml",
+            "hosts/frigate/other/config.yaml",
+            "hosts/nxc/frigate/configuration.nix",
+            "hosts/frigate/README.md",
+            "README.md",
+        ]
+        self.assertEqual(
+            _rendered_config_paths(changed),
+            [
+                "hosts/nxc/frigate/frigate-config.yml",
+                "hosts/frigate/config.yml",
+                "hosts/frigate/other/config.yaml",
+            ],
+        )
+
+    def test_deployment_config_requires_second_review(self) -> None:
+        # A YAML-only change used to skip every Nix check and every review gate.
+        self.assertTrue(_requires_second_review(["hosts/nxc/frigate/frigate-config.yml"]))
+        self.assertTrue(_requires_second_review(["hosts/nxc/frigate/configuration.nix"]))
+        self.assertFalse(_requires_second_review(["README.md"]))
+
+    def test_second_review_required_for_config_only_change(self) -> None:
+        with self.assertRaises(NixPrError):
+            _second_review_check(["hosts/nxc/frigate/frigate-config.yml"], None)
+
+    def test_second_review_digest_matches_file(self) -> None:
+        review = Path(self.repo_fixture.path) / "review.md"
+        review.write_text("VERDICT: APPROVE\n", encoding="utf-8")
+        check = _second_review_check(["hosts/nxc/frigate/frigate-config.yml"], review)
+        self.assertIsNotNone(check)
+        assert check is not None
+        self.assertEqual(check["status"], "passed")
+        self.assertEqual(check["digest"], hashlib.sha256(review.read_bytes()).hexdigest())
+
+    def test_no_review_check_for_unrelated_change(self) -> None:
+        self.assertIsNone(_second_review_check(["README.md"], None))
+
+    def test_placeholders_render_to_inert_values(self) -> None:
+        rendered = render_config_placeholders(
+            'password: "{FRIGATE_MQTT_PASSWORD}"\nurl: rtsp://u:{FRIGATE_CAMERA_PASSWORD}@h/s\n'
+        )
+        self.assertNotIn("{FRIGATE_", rendered)
+        self.assertIn("dummy-frigate_mqtt_password", rendered)
+        self.assertIn("dummy-frigate_camera_password", rendered)
+
+    def test_frigate_image_is_read_from_the_host_configuration(self) -> None:
+        host_dir = Path(self.repo_fixture.path) / "hosts" / "demo" / "frigate"
+        host_dir.mkdir(parents=True)
+        (host_dir / "configuration.nix").write_text(
+            '      image = "ghcr.io/blakeblackshear/frigate:9.9.9";\n', encoding="utf-8"
+        )
+        (host_dir / "frigate-config.yml").write_text("version: 9.9-0\n", encoding="utf-8")
+        self.assertEqual(
+            frigate_image(self.repo, "hosts/demo/frigate/frigate-config.yml"),
+            "ghcr.io/blakeblackshear/frigate:9.9.9",
+        )
+
+    def test_missing_image_reference_is_reported(self) -> None:
+        host_dir = Path(self.repo_fixture.path) / "hosts" / "demo" / "frigate"
+        host_dir.mkdir(parents=True)
+        (host_dir / "configuration.nix").write_text("{}", encoding="utf-8")
+        (host_dir / "frigate-config.yml").write_text("version: 9.9-0\n", encoding="utf-8")
+        with self.assertRaises(NixPrError):
+            frigate_image(self.repo, "hosts/demo/frigate/frigate-config.yml")
+
+    def test_image_reference_cannot_smuggle_a_shell_command(self) -> None:
+        """The image is interpolated into a root shell command on the target host."""
+        host_dir = Path(self.repo_fixture.path) / "hosts" / "demo" / "frigate"
+        host_dir.mkdir(parents=True)
+        (host_dir / "configuration.nix").write_text(
+            '      image = "ghcr.io/blakeblackshear/frigate:0.18.2$(touch /root/pwned)";\n',
+            encoding="utf-8",
+        )
+        (host_dir / "frigate-config.yml").write_text("version: 9.9-0\n", encoding="utf-8")
+        with self.assertRaises(NixPrError):
+            frigate_image(self.repo, "hosts/demo/frigate/frigate-config.yml")
+
+    def test_unknown_placeholder_is_refused_rather_than_uploaded(self) -> None:
+        with self.assertRaises(NixPrError):
+            render_config_placeholders('other: "{SOME_OTHER_SERVICE_TOKEN}"\n')
+
+    def test_skip_is_recorded_rather_than_silently_passing(self) -> None:
+        checks = _run_rendered_config_validation(
+            self.repo, ["hosts/nxc/frigate/frigate-config.yml"], skip=True
+        )
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["status"], "skipped")
+        self.assertEqual(checks[0]["reason"], "--skip-rendered-config")
+
+    def test_no_check_when_no_deployment_config_changed(self) -> None:
+        self.assertEqual(_run_rendered_config_validation(self.repo, ["README.md"], skip=False), [])
+
+    def test_configs_without_a_validator_are_named_not_implied(self) -> None:
+        path = Path(self.repo_fixture.path) / "hosts" / "demo" / "other" / "settings.yml"
+        path.parent.mkdir(parents=True)
+        path.write_text("a: 1\n", encoding="utf-8")
+        checks = _run_rendered_config_validation(self.repo, ["hosts/demo/other/settings.yml"], skip=False)
+        self.assertEqual(len(checks), 1)
+        self.assertEqual(checks[0]["status"], "no-validator")
+        self.assertEqual(checks[0]["files"], ["hosts/demo/other/settings.yml"])
 
 
 if __name__ == "__main__":

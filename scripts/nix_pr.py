@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -481,8 +482,26 @@ def _is_nix_change(relative: str) -> bool:
     return relative.endswith(".nix") or Path(relative).name in {"flake.lock", "flake.nix"}
 
 
+def _rendered_config_paths(changed_files: Sequence[str]) -> list[str]:
+    """Deployment configs the host renders from this repo at boot.
+
+    These are not Nix files, so they skip every Nix check, yet they decide
+    whether a service starts or drops into a degraded mode. They need their own
+    validation and their own review gate.
+    """
+    return [
+        relative
+        for relative in changed_files
+        if len(Path(relative).parts) >= 3
+        and Path(relative).parts[0] == "hosts"
+        and relative.endswith((".yml", ".yaml"))
+    ]
+
+
 def _requires_second_review(changed_files: Sequence[str]) -> bool:
-    return any(_is_nix_change(relative) for relative in changed_files)
+    return any(_is_nix_change(relative) for relative in changed_files) or bool(
+        _rendered_config_paths(changed_files)
+    )
 
 
 def _run_nix_validation(
@@ -491,14 +510,9 @@ def _run_nix_validation(
     *,
     hosts: Sequence[str],
     all_hosts: bool,
-    second_review_file: Path | None,
 ) -> list[dict[str, Any]]:
-    if not _requires_second_review(changed_files):
+    if not any(_is_nix_change(relative) for relative in changed_files):
         return []
-    if second_review_file is None:
-        raise NixPrError("Nix/systemd changes require --second-review-file before validation")
-    if not second_review_file.is_file() or not second_review_file.read_text(encoding="utf-8").strip():
-        raise NixPrError("second-model review file must exist and contain a non-empty review")
     selected_hosts = list(hosts)
     if all_hosts:
         selected_hosts = discover_all_hosts(repo)
@@ -518,8 +532,208 @@ def _run_nix_validation(
         checks.append({"name": "nix-eval", "host": host, "status": "passed"})
         repo.run(["nix", "build", "--no-link", "--print-build-logs", "--no-write-lock-file", flake_target])
         checks.append({"name": "nix-build", "host": host, "status": "passed"})
-    review_digest = hashlib.sha256(second_review_file.read_bytes()).hexdigest()
-    checks.append({"name": "second-model-review", "status": "passed", "digest": review_digest})
+    return checks
+
+
+def _second_review_check(
+    changed_files: Sequence[str], second_review_file: Path | None
+) -> dict[str, Any] | None:
+    if not _requires_second_review(changed_files):
+        return None
+    if second_review_file is None:
+        raise NixPrError(
+            "Nix/systemd and deployment-config changes require --second-review-file before validation"
+        )
+    if not second_review_file.is_file() or not second_review_file.read_text(encoding="utf-8").strip():
+        raise NixPrError("second-model review file must exist and contain a non-empty review")
+    return {
+        "name": "second-model-review",
+        "status": "passed",
+        "digest": hashlib.sha256(second_review_file.read_bytes()).hexdigest(),
+    }
+
+
+FRIGATE_CONFIG_VALIDATOR = '''\
+"""Validate a rendered Frigate config against the image's own schema."""
+import sys
+
+import yaml
+from pydantic import ValidationError
+from frigate.config.config import FrigateConfig
+from frigate.util.config import CURRENT_CONFIG_VERSION
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    raw = yaml.safe_load(handle)
+
+problems = []
+try:
+    FrigateConfig.parse_object(raw)
+except ValidationError as error:
+    for item in error.errors():
+        location = " -> ".join(str(part) for part in item["loc"])
+        problems.append("schema: %s :: %s" % (location, item["msg"]))
+except Exception as error:  # noqa: BLE001 - surface anything the loader raises
+    problems.append("schema: %s: %s" % (type(error).__name__, error))
+
+declared = str(raw.get("version"))
+if declared != CURRENT_CONFIG_VERSION:
+    problems.append(
+        "version: config declares %r but this image expects %r" % (declared, CURRENT_CONFIG_VERSION)
+    )
+
+if problems:
+    print("RESULT:INVALID")
+    for problem in problems:
+        print("  " + problem)
+    raise SystemExit(1)
+print("RESULT:VALID")
+'''
+
+REMOTE_CONFIG_TEMPLATE = "/tmp/nix-pr-rendered-config.XXXXXX"
+PLACEHOLDER = re.compile(r"\{(FRIGATE_[A-Z_]+)\}")
+ANY_PLACEHOLDER = re.compile(r"\{[A-Z_][A-Z0-9_]*\}")
+SAFE_IMAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:@-]*$")
+REMOTE_PATH_SHAPE = re.compile(r"^/tmp/nix-pr-rendered-config\.[A-Za-z0-9]+$")
+
+
+def _ssh_target(host: str) -> str:
+    domain = os.environ.get("NIX_PR_SSH_DOMAIN", "skink-galaxy.ts.net")
+    return f"root@{host}.{domain}"
+
+
+def render_config_placeholders(text: str) -> str:
+    """Replace secret placeholders with inert values so the schema can be checked.
+
+    Only shapes matter for validation; real secrets never enter this path. A
+    placeholder this does not know how to render is an error rather than a
+    silent upload of real secret material.
+    """
+    rendered = PLACEHOLDER.sub(lambda match: "dummy-" + match.group(1).lower(), text)
+    leftover = ANY_PLACEHOLDER.search(rendered)
+    if leftover:
+        raise NixPrError(
+            f"unrendered placeholder {leftover.group(0)} would upload secret material; "
+            "add a substitution for it before validating"
+        )
+    return rendered
+
+
+def frigate_image(repo: Repository, relative: str) -> str:
+    """Read the pinned image from the configuration.nix beside the config file."""
+    config_path = (repo.root / relative).parent / "configuration.nix"
+    if not config_path.is_file():
+        raise NixPrError(f"no configuration.nix beside {relative}: {config_path}")
+    match = re.search(
+        r'image\s*=\s*"(ghcr\.io/blakeblackshear/frigate:[^"]+)"',
+        config_path.read_text(encoding="utf-8"),
+    )
+    if not match:
+        raise NixPrError(f"cannot find the frigate image reference in {config_path}")
+    image = match.group(1)
+    # This value is interpolated into a root shell command on the target host,
+    # so anything outside a container reference is rejected rather than quoted.
+    if not SAFE_IMAGE.match(image):
+        raise NixPrError(f"refusing to use image reference {image!r} from {config_path}")
+    return image
+
+
+def _ssh(
+    repo: Repository, target: str, script: str, *, input_text: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run a POSIX script on the target host.
+
+    The login shell is not assumed to be POSIX -- this fleet's is fish -- so the
+    script is always handed to bash explicitly. stdin is left free for content.
+    """
+    return repo.run(
+        [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            target,
+            f"bash -c {shlex.quote(script)}",
+        ],
+        input_text=input_text,
+        check=False,
+    )
+
+
+def _validate_rendered_frigate(repo: Repository, host: str, relative: str) -> dict[str, Any]:
+    template = (repo.root / relative).read_text(encoding="utf-8")
+    rendered = render_config_placeholders(template)
+    image = frigate_image(repo, relative)
+    target = _ssh_target(host)
+
+    # A per-run, exclusively created path: a fixed /tmp name would let a planted
+    # symlink redirect a root-owned write, and two concurrent runs would collide
+    # on one file and could validate each other's content. The remote script
+    # removes its own file if the write fails, so a failure cannot leak it.
+    created = _ssh(
+        repo,
+        target,
+        "umask 077; p=$(mktemp "
+        + shlex.quote(REMOTE_CONFIG_TEMPLATE)
+        + ') || exit 1; if cat > "$p"; then printf \'%s\\n\' "$p"; else rm -f "$p"; exit 1; fi',
+        input_text=rendered,
+    )
+    remote_path = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
+    if created.returncode or not REMOTE_PATH_SHAPE.match(remote_path):
+        raise NixPrError(
+            f"cannot upload the rendered {relative} to {target} for validation "
+            f"(is the host reachable? rerun with --skip-rendered-config if that is expected)\n"
+            f"{(created.stderr or created.stdout).strip()}"
+        )
+    quoted_path = shlex.quote(remote_path)
+    try:
+        result = _ssh(
+            repo,
+            target,
+            "podman run --rm -i --pull missing --network none "
+            f"-v {quoted_path}:/cfg.yml:ro --entrypoint python3 {shlex.quote(image)} - /cfg.yml",
+            input_text=FRIGATE_CONFIG_VALIDATOR,
+        )
+    finally:
+        _ssh(repo, target, f"rm -f {quoted_path}")
+
+    output = (result.stdout + result.stderr).strip()
+    lines = output.splitlines()
+    if result.returncode or "RESULT:VALID" not in lines:
+        raise NixPrError(
+            f"rendered config {relative} is not valid for {image} (host {host}):\n{output}"
+        )
+    return {"name": "rendered-config", "host": host, "path": relative, "image": image, "status": "passed"}
+
+
+def _run_rendered_config_validation(
+    repo: Repository, changed_files: Sequence[str], *, skip: bool
+) -> list[dict[str, Any]]:
+    paths = _rendered_config_paths(changed_files)
+    if not paths:
+        return []
+    if skip:
+        return [
+            {
+                "name": "rendered-config",
+                "status": "skipped",
+                "files": paths,
+                "reason": "--skip-rendered-config",
+            }
+        ]
+    checks: list[dict[str, Any]] = []
+    unvalidated: list[str] = []
+    for relative in paths:
+        if Path(relative).name == "frigate-config.yml":
+            hosts = direct_hosts([relative])
+            if not hosts:
+                raise NixPrError(f"cannot infer the host for {relative}")
+            checks.append(_validate_rendered_frigate(repo, hosts[0], relative))
+        else:
+            unvalidated.append(relative)
+    if unvalidated:
+        # Name the gap instead of implying coverage this tool does not have.
+        checks.append({"name": "rendered-config", "status": "no-validator", "files": sorted(unvalidated)})
     return checks
 
 
@@ -530,6 +744,7 @@ def run_check(
     hosts: Sequence[str] = (),
     all_hosts: bool = False,
     second_review_file: Path | None = None,
+    skip_rendered_config: bool = False,
 ) -> dict[str, Any]:
     branch = ensure_ready_repository(repo)
     base_sha = _live_origin(repo)
@@ -543,15 +758,20 @@ def run_check(
         {"name": "repository-state", "status": "passed"},
         {"name": "secret-scan", "status": "passed", "files": len(changed)},
     ]
+    # Enforce the review requirement before any host-touching work, so a change
+    # missing its review is rejected without side effects.
+    review_check = _second_review_check(changed, second_review_file)
     checks.extend(
         _run_nix_validation(
             repo,
             changed,
             hosts=hosts,
             all_hosts=all_hosts,
-            second_review_file=second_review_file,
         )
     )
+    checks.extend(_run_rendered_config_validation(repo, changed, skip=skip_rendered_config))
+    if review_check is not None:
+        checks.append(review_check)
     receipt = {
         "version": 1,
         "cli_version": VERSION,
@@ -817,7 +1037,16 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = commands.add_parser("check", help="validate the current worktree")
     check_parser.add_argument("--host", action="append", default=[], help="affected host; may be repeated")
     check_parser.add_argument("--all-hosts", action="store_true", help="validate every flake host")
-    check_parser.add_argument("--second-review-file", type=Path, help="saved second-model review for Nix changes")
+    check_parser.add_argument(
+        "--second-review-file",
+        type=Path,
+        help="saved second-model review for Nix and deployment-config changes",
+    )
+    check_parser.add_argument(
+        "--skip-rendered-config",
+        action="store_true",
+        help="skip validating rendered deployment configs (recorded as skipped in the receipt)",
+    )
 
     commit_parser = commands.add_parser("commit", help="create a validated commit from the staged group")
     commit_parser.add_argument("--message-file", required=True, type=Path)
@@ -843,6 +1072,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 hosts=args.host,
                 all_hosts=args.all_hosts,
                 second_review_file=args.second_review_file,
+                skip_rendered_config=args.skip_rendered_config,
             )
             print(f"validation passed: {receipt['receipt_path'] if 'receipt_path' in receipt else receipt_path(repo, args.state_dir)}")
         elif args.command == "commit":
