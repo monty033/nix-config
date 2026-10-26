@@ -49,6 +49,8 @@
       # SQLite's online-backup API before the first boot of this generation.
       # Rolling back to 0.17.2 means stopping the container, restoring that
       # backup, and removing any stale -wal/-shm sidecars beside it.
+      # Keep frigate-config.yml's version: key matching this image's config
+      # version -- any 0.18.x reports 0.18-0.
       image = "ghcr.io/blakeblackshear/frigate:0.18.2";
 
       # Use host network mode for easier access to go2rtc

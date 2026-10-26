@@ -1,3 +1,11 @@
+# Must match the config version the pinned image reports (every 0.18.x reports
+# 0.18-0; a patch bump within the series does not change it). Frigate treats a
+# missing version as 0.13 and re-runs its whole migration chain on every start;
+# because this file is re-rendered from this template each boot, the version the
+# app writes back at runtime is discarded, so without this key every restart
+# replays every migration. Bump it when an upgrade crosses a config version.
+version: 0.18-0
+
 mqtt:
   enabled: true
   host: 192.168.86.100
