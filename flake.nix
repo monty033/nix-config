@@ -396,6 +396,17 @@
           inherit inputs;
         });
 
+    # Non-gate Stage 9 drill (this does NOT close G2): generated encrypted
+    # fixture, real recovery CLI, restart/access checks, and the framed server
+    # with a test-chosen policy in a throwaway VM. The daemon is a stub and the
+    # corrupted bundle is never recovered.
+    checks.x86_64-linux.nookbridge-recovery =
+      nixpkgs.legacyPackages.x86_64-linux.testers.nixosTest
+        (import ./tests/nookbridge-recovery.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          inherit inputs;
+        });
+
     # Pure settings-module check: inline Nix settings are rendered to the
     # same closed JSON schema consumed by nookd, with null option fields
     # removed and invalid override selectors rejected at evaluation time.
