@@ -36,6 +36,34 @@ nrs-wtf host="$HOSTNAME":
 nfc:
   sudo nix flake check
 
+# Python unit tests. Hermetic: no network, no sudo, no host access.
+# Every suite here was verified passing without contacting live infrastructure.
+# Two suites are deliberately excluded, both failing on master before this recipe:
+#   test_dns_migration              one assertion fails (17 != 16 in the rendered plan)
+#   test_hermes_relay_plugin_import needs `requests`, which the devshell provides
+# Add a suite here only once it passes; a recipe that is red on arrival teaches
+# everyone to ignore it.
+
+# run the hermetic Python unit tests
+test:
+  python3 -m unittest \
+    tests.test_nix_pr \
+    tests.test_pihole_audit \
+    tests.test_pihole_baseline \
+    tests.test_pihole_deploy_setup_reconcile \
+    tests.test_pihole_deploy_transport_recovery \
+    tests.test_pihole_list_authority \
+    tests.test_pihole_live_adapter \
+    tests.test_pihole_live_apply \
+    tests.test_pihole_live_dry_run \
+    tests.test_pihole_live_reconcile \
+    tests.test_pihole_policy_adlist_discard \
+    tests.test_pihole_policy_reconcile \
+    tests.test_pihole_setup_behavior \
+    tests.test_pihole_setup_script \
+    tests.test_pihole_setup_sops_credential \
+    tests.test_switch_dns_path
+
 secrets:
   -nix-shell -p sops --run "SOPS_AGE_KEY_FILE='/home/patrick/.config/sops/age/keys.txt' sops secrets/secrets.yaml"
 
