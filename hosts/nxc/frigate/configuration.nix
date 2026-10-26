@@ -44,7 +44,11 @@
   virtualisation.oci-containers = {
     backend = "podman";
     containers.frigate = {
-      image = "ghcr.io/blakeblackshear/frigate:0.17.2";
+      # 0.18 runs a one-way database migration on first start. Back up
+      # /var/lib/frigate/db/frigate.db together with its -wal/-shm sidecars
+      # before the first boot of this generation; rolling back to 0.17.2
+      # means restoring that backup.
+      image = "ghcr.io/blakeblackshear/frigate:0.18.2";
 
       # Use host network mode for easier access to go2rtc
       extraOptions = [
