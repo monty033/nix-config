@@ -65,8 +65,9 @@
 #      is free of the runtime-generated secret bytes.
 #  12. Packaged tree listing returns an opaque root handle and paginated child
 #      entries without filesystem paths or sensitive names.
-#  13. Packaged edit and undo input envelopes reject empty stdin before runtime
-#      access.
+#  13. Packaged edit and undo refuse the retired `--stdin`/`--token` carriers
+#      before runtime access; stdin is never read. Since the operator create
+#      slice that refusal is a categorical exit-2 error, not `invalid-input`.
 #  14. Packaged edit/undo runtime proves update, encrypted inverse state,
 #      successful undo, stale-revision conflict retention, and expiry cleanup.
 
@@ -178,7 +179,19 @@ let
       undoInput: "",
       createRuntime: neverConstruct,
     });
-    if (edit.kind !== "invalid-input" || undo.kind !== "invalid-input")
+    // Since the create slice landed, the retired carrier is a categorical
+    // `error` (exit 2) rather than `invalid-input`. The exit code is what proves
+    // refusal-before-runtime: a construction attempt surfaces as exit 3, and
+    // `neverConstruct` is never reached on this path.
+    const refusedBeforeRuntime = (result, needle) =>
+      result.kind === "error"
+      && result.exitCode === 2
+      && typeof result.message === "string"
+      && result.message.includes(needle);
+    if (
+      !refusedBeforeRuntime(edit, "not supplied on stdin")
+      || !refusedBeforeRuntime(undo, "no token is accepted")
+    )
       throw new Error("notes boundary fixture failed");
     process.stdout.write("stage9 notes boundary: no runtime\\n");
   '';
@@ -526,21 +539,25 @@ in
       with subtest("notes edit rejects missing bounded stdin before runtime"):
           rc, output = machine.execute(
               "runuser -u hermes -- env NOOKBRIDGE_STATE_DIR=/var/lib/nookbridge "
+              # nookctl writes the categorical refusal to stderr; merge it into
+              # the captured stream so the assertion can see it.
               "/run/current-system/sw/bin/nookctl notes edit --handle not_handle "
-              "--approve-edit --stdin < /dev/null"
+              "--approve-edit --stdin < /dev/null 2>&1"
           )
           assert rc == 2, f"unexpected edit exit code: {rc}"
-          assert "nookctl notes: invalid-input" in output
-          assert "runtime unavailable" not in output
+          assert "not supplied on stdin" in output
+          assert "runtime construction refused" not in output
+          assert "nookctl notes: error" not in output
 
       with subtest("notes undo rejects missing bounded stdin before runtime"):
           rc, output = machine.execute(
               "runuser -u hermes -- env NOOKBRIDGE_STATE_DIR=/var/lib/nookbridge "
-              "/run/current-system/sw/bin/nookctl notes undo --approve-edit --stdin < /dev/null"
+              "/run/current-system/sw/bin/nookctl notes undo --approve-edit --stdin < /dev/null 2>&1"
           )
           assert rc == 2, f"unexpected undo exit code: {rc}"
-          assert "nookctl notes: invalid-input" in output
-          assert "runtime unavailable" not in output
+          assert "no token is accepted" in output
+          assert "runtime construction refused" not in output
+          assert "nookctl notes: error" not in output
 
       with subtest("packaged edit undo fixture covers update undo conflict expiry"):
           rc, fixture = machine.execute(
