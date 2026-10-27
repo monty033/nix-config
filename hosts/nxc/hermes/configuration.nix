@@ -867,6 +867,21 @@ in
 
       approvals = {
         mode = "smart";
+        # The guardian classifies a tool call and may approve it without asking.
+        # That is fine for shell commands it recognises; it is not fine for an
+        # outbound mail. proton_send, an event invite with attendees, and the
+        # three irreversible deletions are never approved by the guardian; they
+        # reach the operator instead. This is policy text appended to the
+        # guardian's prompt, not a structured rule, so it steers that judgement
+        # rather than replacing it.
+        smart_policy = ''
+          Always escalate these to the operator; never approve them yourself,
+          whatever the recipient or the apparent intent: proton_send,
+          proton_create_event when it has attendees, proton_delete with
+          permanent set, proton_empty, and proton_delete_contact. A send cannot
+          be recalled, and its recipient can be influenced by the content of
+          the mail being read.
+        '';
       };
 
       quick_commands = {
@@ -893,12 +908,18 @@ in
         "hermes-proton"
       ];
       # hermes-proton registers two toolsets: `proton_mail` (read) and
-      # `proton_mail_write` (send, delete, upload, share, invite). Plugin
-      # toolsets are on for every platform by default, so the read-only posture
-      # is enforced here: this global suppression runs last and strips the write
-      # tools from every surface, cron jobs included. Removing this line is the
-      # follow-up change that enables sending.
-      agent.disabled_toolsets = [ "proton_mail_write" ];
+      # `proton_mail_write` (send, delete, upload, share, invite). Both are
+      # enabled now that an account is signed in. What bounds a write is not the
+      # toolset but three other things: the recipient allowlist below (who may be
+      # written to at all), the plugin's own pre_tool_call gate, which requires
+      # approval for every send, every event invitation that carries attendees,
+      # and the three deletions that have no undo, and the escalation rule in
+      # approvals.smart_policy, which instructs the guardian not to approve those
+      # on the operator's behalf.
+      plugins.entries."hermes-proton".settings.allowed_recipients = [
+        "pmontgo33@gmail.com"
+        "montgomeryp@chop.edu"
+      ];
       # Lazy plugin installs stay off: Hermes must not fetch dependencies at
       # runtime. Plugins come only from the Nix-managed extraPlugins above.
       security.allow_lazy_installs = false;
