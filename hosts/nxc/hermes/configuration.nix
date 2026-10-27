@@ -187,6 +187,49 @@ let
     cp -r ${mnemosyneHermes}/lib/python3.12/site-packages/mnemosyne_hermes/* $out/
     chmod -R a+rX $out
   '';
+  # hermes-proton — Proton Mail, Calendar, Contacts and Drive for Hermes, over
+  # Proton's private web API (no Bridge, no paid plan). Pinned by COMMIT rather
+  # than version: the plugin is community-maintained against an API Proton can
+  # change without notice, so the exact reviewed tree is the only thing that can
+  # be reasoned about.
+  #
+  # Two packaging facts drive the shape below:
+  #   * Hermes runs Python 3.14 from its sealed venv, so extension modules the
+  #     plugin loads must come from `package.python.pkgs` — the python312 set
+  #     used by the Mnemosyne packaging above would produce a wheel with the
+  #     wrong ABI (`ModuleNotFoundError` at import, not at build).
+  #   * nix-hermes-agent's extraPythonPackages guard fails the build when an
+  #     extra package re-supplies a name already in the venv. PGPy13's declared
+  #     deps (cryptography, pyasn1) are already there at compatible versions, so
+  #     they are deliberately not propagated and resolve from the venv instead.
+  hermesProtonSrc = pkgs.fetchFromGitHub {
+    owner = "Maytrella007";
+    repo = "hermes-proton";
+    rev = "3e0612848cf20116294f9ff58e74aadf34bc858e";
+    hash = "sha256-sI10YsmMRJs4GdTq47SgneiN2Ea0E+9MUsjmABfvHwE=";
+  };
+  # Upstream ships the plugin and its `protonlite` client in one tree, and the
+  # plugin imports the client from its own directory (`import protonlite`), so
+  # the checkout IS the plugin directory. Copying the tree keeps the client and
+  # the tools on exactly the pinned commit — no second artifact to drift.
+  hermesProtonPlugin = pkgs.runCommand "hermes-proton" { } ''
+    cp -r ${hermesProtonSrc} $out
+    chmod -R a+rX $out
+  '';
+  protonPGPy = config.services.hermes-agent.package.python.pkgs.buildPythonPackage rec {
+    pname = "pgpy13";
+    version = "0.6.1rc1";
+    format = "wheel";
+    src = pkgs.fetchurl {
+      url = "https://files.pythonhosted.org/packages/4f/de/8e43636f1244989fb733513fa7c1252a3f82feda4ee861ec1b6377f2e6e7/pgpy13-0.6.1rc1-py3-none-any.whl";
+      hash = "sha256-yNbPPeoMwjNz/xxO15pqS/OSFr9UlwuufMplYAPRqk8=";
+    };
+    # See the guard note above: propagating these would fail the build and
+    # shadow the venv's own copies at runtime.
+    propagatedBuildInputs = [ ];
+    dontCheckRuntimeDeps = true;
+    doCheck = false;
+  };
   # Claude Subscription DirectSDK (experimental) — routes Hermes inference
   # through the official Claude Code CLI so a Claude Pro/Max subscription can
   # serve as a conversation model. The plugin now discovers available models
@@ -574,6 +617,10 @@ in
       # supplies the subscription fallback route and the Claude aliases;
       # Codex stays as the last, independent fallback.
       claudeSubscriptionDirectsdkPlugin
+      # Proton Mail/Calendar/Contacts/Drive. Read-only on arrival: the write
+      # toolset is suppressed below, and the recipient allowlist is empty, so
+      # sending is refused twice over. Sending is a follow-up change.
+      hermesProtonPlugin
     ];
     # The subscription model-provider plugin resolves its transport by looking
     # up the vendor CLI on PATH (`shutil.which`), and the service PATH is
@@ -583,10 +630,16 @@ in
     #
     # The same applies to the discovery-time provider check the dashboard
     # performs (see systemd.services.hermes-dashboard.path below).
-    extraPackages = [ claudeCodeForHermes ];
+    extraPackages = [ claudeCodeForHermes pkgs.gnupg ];
     extraPythonPackages = [
       mnemosyneMemory
       mnemosyneHermes
+      # hermes-proton. bcrypt is the only compiled dependency Hermes' venv does
+      # not already carry — the SRP login handshake hashes with it — and it
+      # must match the runtime interpreter. cryptography, pyasn1 and requests
+      # come from the venv.
+      config.services.hermes-agent.package.python.pkgs.bcrypt
+      protonPGPy
     ];
 
     settings = {
@@ -822,7 +875,15 @@ in
         "claude-subscription-directsdk-experimental"
         "homeassistant"
         "hermes-session-reset-policy"
+        "hermes-proton"
       ];
+      # hermes-proton registers two toolsets: `proton_mail` (read) and
+      # `proton_mail_write` (send, delete, upload, share, invite). Plugin
+      # toolsets are on for every platform by default, so the read-only posture
+      # is enforced here: this global suppression runs last and strips the write
+      # tools from every surface, cron jobs included. Removing this line is the
+      # follow-up change that enables sending.
+      agent.disabled_toolsets = [ "proton_mail_write" ];
       # Lazy plugin installs stay off: Hermes must not fetch dependencies at
       # runtime. Plugins come only from the Nix-managed extraPlugins above.
       security.allow_lazy_installs = false;
@@ -1107,6 +1168,11 @@ in
     "d /var/lib/hermes/.hermes/mnemosyne 0750 hermes users -"
     "d /var/lib/hermes/nookbridge-dash 0750 hermes users -"
     "d /var/lib/hermes/.hermes/plugins 0750 hermes users -"
+    # Plugin runtime state — hermes-proton keeps one 0600 session file per
+    # signed-in Proton account here, holding the access/refresh tokens and the
+    # salted key passphrase. The directory stays private because the file names
+    # are account addresses. Runtime state, never Nix-declared content.
+    "d /var/lib/hermes/.hermes/plugin-data 0700 hermes users -"
     # The memory provider loader resolves providers by this directory name;
     # expose the Nix-built plugin at the canonical `mnemosyne` path instead of
     # relying on the mutable user-installed wrapper.
