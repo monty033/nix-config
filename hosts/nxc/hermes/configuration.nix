@@ -509,6 +509,26 @@ in
     group = "users";
     mode = "0400";
   };
+  # The Proton recipient allowlist, deliberately NOT a declarative setting: it is
+  # personal data, and a declarative setting writes it into git, the Nix store and
+  # the 0660 runtime config.yaml in plain text (the module's environmentFiles
+  # option would instead merge it into .env -- also plain text). sops-nix decrypts
+  # this file to a 0400 path that the gateway unit loads as a systemd
+  # EnvironmentFile, so the plugin's os.environ fallback finds
+  # PROTON_ALLOWED_RECIPIENTS with the addresses encrypted at rest.
+  # The `key` names the single entry in the encrypted file, matching the sibling
+  # env-style secrets: the value is the whole `VAR=value` line, which is what
+  # systemd expects to parse. Rotation means re-encrypting, committing and
+  # activating; restartUnits makes the new value take effect in the running unit.
+  sops.secrets."hermes-proton-env" = {
+    sopsFile = ../../../secrets/hermes-proton-env.yaml;
+    key = "hermes-proton-env";
+    format = "yaml";
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+    restartUnits = [ "hermes-agent.service" ];
+  };
   sops.secrets."hermes-webhook" = {
     owner = "hermes";
     group = "users";
@@ -870,10 +890,10 @@ in
         # The guardian classifies a tool call and may approve it without asking.
         # That is fine for shell commands it recognises; it is not fine for an
         # outbound mail. proton_send, an event invite with attendees, and the
-        # three irreversible deletions are never approved by the guardian; they
-        # reach the operator instead. This is policy text appended to the
-        # guardian's prompt, not a structured rule, so it steers that judgement
-        # rather than replacing it.
+        # three irreversible deletions are instructed to escalate rather than be
+        # auto-approved, so they reach the operator. This is policy text appended
+        # to the guardian's prompt, not a structured rule, so it steers that
+        # judgement rather than replacing it.
         smart_policy = ''
           Always escalate these to the operator; never approve them yourself,
           whatever the recipient or the apparent intent: proton_send,
@@ -910,16 +930,15 @@ in
       # hermes-proton registers two toolsets: `proton_mail` (read) and
       # `proton_mail_write` (send, delete, upload, share, invite). Both are
       # enabled now that an account is signed in. What bounds a write is not the
-      # toolset but three other things: the recipient allowlist below (who may be
-      # written to at all), the plugin's own pre_tool_call gate, which requires
-      # approval for every send, every event invitation that carries attendees,
-      # and the three deletions that have no undo, and the escalation rule in
-      # approvals.smart_policy, which instructs the guardian not to approve those
-      # on the operator's behalf.
-      plugins.entries."hermes-proton".settings.allowed_recipients = [
-        "pmontgo33@gmail.com"
-        "montgomeryp@chop.edu"
-      ];
+      # toolset but three other things: the recipient allowlist (who may be
+      # written to at all -- it is NOT declared here; it comes from the
+      # hermes-proton-env sops secret via PROTON_ALLOWED_RECIPIENTS so the
+      # addresses never appear in this file, the store or config.yaml), the
+      # plugin's own pre_tool_call gate, which requires approval for every send,
+      # every event invitation that carries attendees, and the three deletions
+      # that have no undo, and the escalation rule in approvals.smart_policy,
+      # which instructs the guardian not to approve those on the operator's
+      # behalf.
       # Lazy plugin installs stay off: Hermes must not fetch dependencies at
       # runtime. Plugins come only from the Nix-managed extraPlugins above.
       security.allow_lazy_installs = false;
@@ -1182,6 +1201,20 @@ in
     WIKI_PATH = "/var/lib/hermes/vault/MontyVault/Hermes/Wiki";
     PYTHONPATH = mnemosynePythonPath;
   };
+
+  # The Proton recipient allowlist reaches the plugin through os.getenv, so it
+  # has to be in the process environment. It is loaded here as a systemd
+  # EnvironmentFile rather than through services.hermes-agent.environmentFiles,
+  # because that option merges its files into .env -- which would put the
+  # addresses back on disk in plain text, the thing the sops secret exists to
+  # avoid. systemd reads the decrypted 0400 secret directly at unit start; the
+  # ordering entry keeps that behind secrets installation on a boot where /run is
+  # empty, and the value is inherited by any child process the agent spawns, so
+  # it can still surface in an env dump or a core file.
+  systemd.services.hermes-agent.serviceConfig.EnvironmentFile = [
+    config.sops.secrets."hermes-proton-env".path
+  ];
+  systemd.services.hermes-agent.after = [ "sops-install-secrets.service" ];
 
   # Fix file ownership after nix rebuilds. The activation script chowns
   # directories but not individual files — if anything runs as root and
