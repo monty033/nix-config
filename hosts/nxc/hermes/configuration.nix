@@ -307,6 +307,16 @@ let
     fi
     export HERMES_DASHBOARD_SESSION_TOKEN
 
+    # This execs the base hermes-agent package, not the build the gateway unit
+    # runs. The gateway's wrapper appends extraPythonPackages to PYTHONPATH;
+    # without this line every plugin whose dependency is not already in Hermes'
+    # venv fails discovery here ("No module named 'pgpy'") while loading fine in
+    # the gateway. Same construction the module uses for the gateway:
+    # lib.makeSearchPath over the interpreter's site-packages subdir.
+    export PYTHONPATH=${lib.makeSearchPath
+      config.services.hermes-agent.package.python.sitePackages
+      config.services.hermes-agent.extraPythonPackages}''${PYTHONPATH:+:$PYTHONPATH}
+
     exec ${config.services.hermes-agent.package}/bin/hermes dashboard --host 0.0.0.0 --port 9119 --no-open --skip-build
   '';
   forgejo-credential-helper = pkgs.writeShellScript "forgejo-credential-helper" ''
@@ -441,7 +451,12 @@ in
   systemd.services.hermes-agent.serviceConfig.UMask = lib.mkForce "0077";
   systemd.services.hermes-dashboard.restartTriggers =
     [ config.services.hermes-agent.package ]
-    ++ config.services.hermes-agent.extraPlugins;
+    ++ config.services.hermes-agent.extraPlugins
+    # The launch script carries the plugin PYTHONPATH. Changing it alters
+    # ExecStart, so switch-to-configuration already restarts the unit on that
+    # comparison; declaring the script explicitly is belt-and-braces, so the
+    # restart does not depend on the unit-file diff alone.
+    ++ [ hermes-dashboard-launch ];
   extra-services.obsidian-headless = {
     enable = true;
     # Run the sync daemon as the same Unix user that writes vault files
