@@ -152,6 +152,95 @@ with lib; let
       --property=RuntimeMaxSec=10min \
       ${nookbridge}/bin/nookbridge-sync-cli
   '';
+  recoveryCommand = pkgs.writeShellScriptBin "nookbridge-recovery" ''
+    set -eu
+    if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
+      ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-recovery: must be run as root' >&2
+      exit 77
+    fi
+
+    # Bundle recovery owns the exclusive state lock. Suspend nookd while the
+    # transient unit runs, then restore its prior active state on every exit
+    # path. Recovery runs as the service account so fresh files are created
+    # with the ownership nookd expects; it does not need socket access.
+    was_active=no
+    if ${pkgs.systemd}/bin/systemctl is-active --quiet nookd; then
+      was_active=yes
+    fi
+    action=""
+    for arg in "$@"; do
+      case "$arg" in
+        inspect|reinitialize|rollback)
+          action="$arg"
+          break
+          ;;
+      esac
+    done
+    restore() {
+      rc=$?
+      trap - EXIT
+      restore_failed=no
+      # A fresh reinitialize is safe to start when it succeeds. A successful
+      # rollback may intentionally restore a corrupt bundle, so when nookd was
+      # inactive it intentionally remains stopped; an active daemon is always
+      # restored and checked.
+      if [ "$was_active" = yes ] || { [ "$rc" -eq 0 ] && [ "$action" = reinitialize ]; }; then
+        if ! ${pkgs.systemd}/bin/systemctl start nookd \
+          || ! ${pkgs.coreutils}/bin/timeout 30s sh -c '
+            while ! ${pkgs.systemd}/bin/systemctl is-active --quiet nookd; do
+              sleep 0.1
+            done
+          '; then
+          restore_failed=yes
+          ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-recovery: failed to restore nookd.service' >&2
+        fi
+      fi
+      if [ "$restore_failed" = yes ] && [ "$rc" -eq 0 ]; then
+        exit 1
+      fi
+      exit "$rc"
+    }
+    trap restore EXIT
+    if [ "$was_active" = yes ]; then
+      ${pkgs.systemd}/bin/systemctl stop nookd
+      if ! ${pkgs.coreutils}/bin/timeout 30s sh -c 'while test "$(${pkgs.systemd}/bin/systemctl show -p MainPID --value nookd)" != 0 || test -e /var/lib/nookbridge/nookbridge.lock; do sleep 0.1; done'; then
+        ${pkgs.coreutils}/bin/printf '%s\n' 'nookbridge-recovery: timed out waiting for nookd.service to release its state lock' >&2
+        exit 1
+      fi
+    fi
+
+    ${pkgs.systemd}/bin/systemd-run \
+      --quiet --wait --collect --pipe \
+      --unit=nookbridge-recovery-$$.service \
+      --uid=nookbridge \
+      --gid=nookbridge \
+      --property=WorkingDirectory=/var/lib/nookbridge \
+      --property=Environment=HOME=/var/lib/nookbridge \
+      --property=Environment=PATH=${pkgs.coreutils}/bin \
+      --setenv=NOOKBRIDGE_STATE_DIR=/var/lib/nookbridge \
+      --property=LoadCredential=nookbridge-db-key:${credentialPath} \
+      --property=ProtectSystem=strict \
+      --property=ProtectHome=yes \
+      --property=PrivateTmp=yes \
+      --property=PrivateDevices=yes \
+      --property=NoNewPrivileges=yes \
+      --property=RestrictAddressFamilies='AF_UNIX AF_INET AF_INET6' \
+      --property=RestrictNamespaces=yes \
+      --property=ProtectKernelTunables=yes \
+      --property=ProtectKernelModules=yes \
+      --property=ProtectControlGroups=yes \
+      --property=LockPersonality=yes \
+      --property=RestrictRealtime=yes \
+      --property=RestrictSUIDSGID=yes \
+      --property=CapabilityBoundingSet= \
+      --property=AmbientCapabilities= \
+      --property=SystemCallArchitectures=native \
+      --property=ReadWritePaths=/var/lib/nookbridge \
+      --property=UMask=0077 \
+      --property=TimeoutStartSec=10min \
+      --property=RuntimeMaxSec=10min \
+      ${nookbridge}/bin/nookctl recover-local-state bundle "$@"
+  '';
 in {
   options.extra-services.nookbridge = {
     enable = mkEnableOption "NookBridge read-write Unix-socket service with settings-gated delete";
@@ -182,6 +271,7 @@ in {
       nookbridge
       provisionCommand
       syncCommand
+      recoveryCommand
     ];
 
     users.groups.nookbridge = {};

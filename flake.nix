@@ -414,6 +414,16 @@
           inherit inputs;
         });
 
+    # Stage 9 G2: production module/daemon bundle recovery under TCG.  This
+    # check uses the pinned production package and the real sops/Systemd
+    # credential path; it is separate from the non-gate stub drill above.
+    checks.x86_64-linux.nookbridge-production-recovery =
+      nixpkgs.legacyPackages.x86_64-linux.testers.nixosTest
+        (import ./tests/nookbridge-production-recovery.nix {
+          pkgs = nixpkgs.legacyPackages.x86_64-linux;
+          inherit inputs;
+        });
+
     # Pure settings-module check: inline Nix settings are rendered to the
     # same closed JSON schema consumed by nookd, with null option fields
     # removed and invalid override selectors rejected at evaluation time.
@@ -446,6 +456,7 @@
       nookbridgePackage = pkgs.callPackage ./packages/nookbridge.nix { inherit inputs; };
       operatorProvision = builtins.head (builtins.filter (p: p.name == "nookbridge-provision") cfg.environment.systemPackages);
       operatorSync = builtins.head (builtins.filter (p: p.name == "nookbridge-sync") cfg.environment.systemPackages);
+      operatorRecovery = builtins.head (builtins.filter (p: p.name == "nookbridge-recovery") cfg.environment.systemPackages);
     in pkgs.runCommand "nookbridge-service-boundary-check" {
       nativeBuildInputs = [ pkgs.coreutils pkgs.gnugrep pkgs.jq ];
     } ''
@@ -482,13 +493,20 @@
 
       for command in \
         ${operatorProvision}/bin/nookbridge-provision \
-        ${operatorSync}/bin/nookbridge-sync; do
+        ${operatorSync}/bin/nookbridge-sync \
+        ${operatorRecovery}/bin/nookbridge-recovery; do
         test -x "$command"
         ${pkgs.gnugrep}/bin/grep -Fq -- 'id -u' "$command"
         ${pkgs.gnugrep}/bin/grep -Fq -- 'must be run as root' "$command"
-        assert_wrapper_line "  --quiet --wait --collect --pty \\" "$command"
+        if [ "$command" = "${operatorRecovery}/bin/nookbridge-recovery" ]; then
+          assert_wrapper_line "  --quiet --wait --collect --pipe \\" "$command"
+        else
+          assert_wrapper_line "  --quiet --wait --collect --pty \\" "$command"
+        fi
         assert_wrapper_line "  --uid=nookbridge \\" "$command"
-        assert_wrapper_line "  --gid=nookbridge-clients \\" "$command"
+        if [ "$command" != "${operatorRecovery}/bin/nookbridge-recovery" ]; then
+          assert_wrapper_line "  --gid=nookbridge-clients \\" "$command"
+        fi
         assert_wrapper_line "  --property=WorkingDirectory=/var/lib/nookbridge \\" "$command"
         assert_wrapper_line "  --property=Environment=HOME=/var/lib/nookbridge \\" "$command"
         assert_wrapper_line "  --property=Environment=PATH=${pkgs.coreutils}/bin \\" "$command"
@@ -515,6 +533,12 @@
         assert_wrapper_line "  --property=RuntimeMaxSec=10min \\" "$command"
         ! ${pkgs.gnugrep}/bin/grep -Fq -- 'wantedBy' "$command"
       done
+      assert_wrapper_line "  --unit=nookbridge-recovery-\$\$.service \\" ${operatorRecovery}/bin/nookbridge-recovery
+      assert_wrapper_line "  --gid=nookbridge \\" ${operatorRecovery}/bin/nookbridge-recovery
+      assert_wrapper_line "  --setenv=NOOKBRIDGE_STATE_DIR=/var/lib/nookbridge \\" ${operatorRecovery}/bin/nookbridge-recovery
+      assert_wrapper_line "  ${nookbridgePackage}/bin/nookctl recover-local-state bundle \"\$@\"" ${operatorRecovery}/bin/nookbridge-recovery
+      ${pkgs.gnugrep}/bin/grep -Fq -- 'systemctl is-active --quiet nookd' ${operatorRecovery}/bin/nookbridge-recovery
+      ! ${pkgs.gnugrep}/bin/grep -Fq -- '/run/current-system/sw/bin/nookctl' ${operatorRecovery}/bin/nookbridge-recovery
       test -f ${nookbridgePackage}/libexec/nookbridge/dist/provision.js
       test -f ${nookbridgePackage}/libexec/nookbridge/dist/sync.js
 
