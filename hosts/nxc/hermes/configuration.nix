@@ -656,8 +656,8 @@ in
       homeAssistantHermesPlugin
       sessionResetPolicyHermesPlugin
       # Claude Pro/Max via the official Claude Code CLI. The default
-      # conversation route now runs on the OpenCode Go provider, so this plugin
-      # supplies the subscription fallback route and the Claude aliases;
+      # conversation route runs on the DeepSeek platform API directly, so this
+      # plugin supplies the subscription fallback route and the Claude aliases;
       # Codex stays as the last, independent fallback.
       claudeSubscriptionDirectsdkPlugin
       # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
@@ -688,15 +688,18 @@ in
     ];
 
     settings = {
-      # Default conversation model is DeepSeek V4.1 Flash through the OpenCode Go
-      # provider. No per-model compaction override is declared for it (see
-      # compression below), so it uses the global 300k cap like other models —
-      # deliberately short of its 1M window. GPT-6 Luna remains
+      # Default conversation model is DeepSeek V4.1 Flash served directly by the
+      # DeepSeek platform API (provider `deepseek`), not through a reseller. The
+      # ID is `deepseek-flash`, which is what that provider's live /v1/models
+      # returns for this model; the reseller's `deepseek-v4.1-flash` spelling
+      # does not exist on it. No per-model compaction override is declared for it
+      # (see compression below), so it uses the global 300k cap like other
+      # models — deliberately short of its 1M window. GPT-6 Luna remains
       # the native delegation model and an explicit alias (luna); explicit
       # aliases preserve manual model selection when needed.
       model = {
-        default = "deepseek-v4.1-flash";
-        provider = "opencode-go";
+        default = "deepseek-flash";
+        provider = "deepseek";
         # Luna's actual reasoning level is set via agent.reasoning_overrides
         # below ("gpt-6-luna" = "high"), not here — `model.reasoning_effort`
         # is not a recognized key in this section's schema and was a dead
@@ -712,7 +715,13 @@ in
           luna = "openai-codex/gpt-6-luna";
           sol = "openai-codex/gpt-6.1-sol";
           mm = "minimax/MiniMax-M3.1-Flash";
-          flash = "opencode-go/deepseek-v4.1-flash";
+          # The default conversation model, spelled the way the direct provider
+          # serves it. The `flash` name keeps pointing at whatever the default
+          # route is, so it follows this switch.
+          flash = "deepseek/deepseek-flash";
+          # Rollback lever: the reseller route the default used before the
+          # switch to the platform API. Select with `/model ocflash`.
+          ocflash = "opencode-go/deepseek-v4.1-flash";
         };
       };
 
@@ -991,10 +1000,13 @@ in
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
         # Luna is the native delegation model and explicitly uses high here;
-        # the default conversation model (DeepSeek V4.1 Flash) also uses high.
+        # the default conversation model also uses high, declared under both the
+        # direct ID it is routed as and the reseller ID the ocflash alias
+        # resolves to, so the rollback lever keeps the same effort.
         # The general route baseline remains medium, as does Sol by inheritance.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
+          "deepseek-flash" = "high";
           "deepseek-v4.1-flash" = "high";
           "claude-haiku-5-5" = "high";
           "claude-sonnet-5-5" = "medium";
