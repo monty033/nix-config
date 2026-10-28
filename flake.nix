@@ -33,9 +33,12 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 126e808, which adds terminal-confirmed operator
-    # upload approval (S7a-6, #254) and opaque-block editing that keeps notes
-    # with images, attachments or embeds editable (D6-1, #256), plus docs.
+    # Pinned to NookBridge main at 009129b, which adds terminal-confirmed
+    # operator upload approval (S7a-6, #254), opaque-block editing that keeps
+    # notes with images, attachments or embeds editable (D6-1, #256), the
+    # operator-only path diagnostic (#262), and multi-notebook authorization
+    # (#263). The operator listener now admits only `nookbridge-operators`,
+    # which is what lets the host grant it to `nookop` alone (SR-9).
     # Note that D6-1 drops `notes.delete` from the legacy `readWriteNoDelete`
     # profile; the deployed policy here is an explicit `readPolicy` that still
     # includes `notes.delete`, so production behaviour is unchanged.
@@ -51,7 +54,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=126e8089949862a50611bdd08fc6929454b1ee8e";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=009129b571aaab68f411b07bc237fc88c947f030";
       flake = false;
     };
 

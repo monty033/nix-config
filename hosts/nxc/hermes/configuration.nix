@@ -1414,10 +1414,29 @@ in
       fi
     '';
 
+  # SR-9: Hermes and every process it spawns (including the MCP server) are
+  # daemon clients only. Operator access lives behind `nookbridge-as-operator`,
+  # which requires root and drops to the dedicated `nookop` account. Do not add
+  # `nookbridge-operators` here: the agent's shell would regain view, preimage,
+  # apply, browse-operator and upload approval, which is the whole finding.
   users.users.hermes = {
     linger = true;
-    extraGroups = [ "nookbridge-clients" "nookbridge-operators" ];
+    extraGroups = [ "nookbridge-clients" ];
   };
+
+  assertions = [
+    {
+      # Both routes matter: extraGroups on the user, and explicit group members.
+      assertion =
+        !(builtins.elem "nookbridge-operators" config.users.users.hermes.extraGroups)
+        && !(builtins.elem "hermes" (config.users.groups.nookbridge-operators.members or [ ]));
+      message = ''
+        hermes must never hold nookbridge-operators: the agent runtime and the
+        MCP server it launches inherit that identity and would regain the
+        operator surface (SR-9). Use `sudo nookbridge-as-operator` instead.
+      '';
+    }
+  ];
 
   # NixOS's switch-to-configuration reloads lingering user units after
   # activation. On a headless LXC, logind can have created the linger marker

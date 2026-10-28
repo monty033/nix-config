@@ -241,6 +241,23 @@ with lib; let
       --property=RuntimeMaxSec=10min \
       ${nookbridge}/bin/nookctl recover-local-state bundle "$@"
   '';
+
+  # Operator access is a human capability, not an agent one. setpriv drops to
+  # nookop, which holds the operator group; root is required, so a compromised
+  # agent cannot use this. nookop also holds nookbridge-clients because the
+  # socket nodes are owned by that group — the operator/listener separation is
+  # the authorizer's group check, not the file mode.
+  operatorCommand = pkgs.writeShellScriptBin "nookbridge-as-operator" ''
+    set -eu
+    if [ "$(${pkgs.coreutils}/bin/id -u)" -ne 0 ]; then
+      ${pkgs.coreutils}/bin/printf '%s\n' \
+        'nookbridge-as-operator: must be run as root (sudo)' >&2
+      exit 77
+    fi
+    exec ${pkgs.util-linux}/bin/setpriv \
+      --reuid=nookop --regid=nookop --init-groups -- \
+      ${nookbridge}/bin/nookctl "$@"
+  '';
 in {
   options.extra-services.nookbridge = {
     enable = mkEnableOption "NookBridge read-write Unix-socket service with settings-gated delete";
@@ -272,6 +289,7 @@ in {
       provisionCommand
       syncCommand
       recoveryCommand
+      operatorCommand
     ];
 
     users.groups.nookbridge = {};
@@ -284,6 +302,22 @@ in {
       createHome = false;
       shell = "${pkgs.shadow}/bin/nologin";
       extraGroups = [ "nookbridge-clients" ];
+    };
+
+    # The operator surface gets exactly one identity, and it is not the one any
+    # agent runtime runs under. It holds `nookbridge-clients` because the socket
+    # nodes are owned by that group (the daemon runs with UMask 0007), and
+    # `nookbridge-operators` because admission to the operator listener is a
+    # separate check. The separation that matters is the one below: no process
+    # the agent spawns holds `nookbridge-operators`.
+    users.groups.nookop = {};
+    users.users.nookop = {
+      isSystemUser = true;
+      group = "nookop";
+      home = "/var/lib/nookbridge-operator";
+      createHome = false;
+      shell = "${pkgs.shadow}/bin/nologin";
+      extraGroups = [ "nookbridge-clients" "nookbridge-operators" ];
     };
 
     # The source secret is root-readable only. systemd reads it as the
