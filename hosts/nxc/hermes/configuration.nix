@@ -438,6 +438,14 @@ in
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.memory)
       (builtins.toJSON config.services.hermes-agent.settings.tts)
+      # Toolset enablement partly lives in settings.agent: disabled_toolsets is
+      # here. settings.toolsets and platform_toolsets are not covered by any
+      # restart trigger, so changing those still needs a manual restart of the
+      # gateway. Without this trigger the activation merge updates config.yaml
+      # while the running gateway keeps the toolset list it started with, so
+      # enabling a toolset appears to do nothing until some unrelated change
+      # restarts the service.
+      (builtins.toJSON config.services.hermes-agent.settings.agent)
     ]
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
@@ -652,9 +660,11 @@ in
       # supplies the subscription fallback route and the Claude aliases;
       # Codex stays as the last, independent fallback.
       claudeSubscriptionDirectsdkPlugin
-      # Proton Mail/Calendar/Contacts/Drive. Read-only on arrival: the write
-      # toolset is suppressed below, and the recipient allowlist is empty, so
-      # sending is refused twice over. Sending is a follow-up change.
+      # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
+      # the recipient allowlist comes from the hermes-proton-env sops secret
+      # (see sops.secrets below) and the plugin's pre_tool_call hook raises an
+      # approval for each send, attendee invite, RSVP, Drive upload or share,
+      # permanent delete, trash empty and contact delete.
       hermesProtonPlugin
     ];
     # The subscription model-provider plugin resolves its transport by looking
@@ -929,11 +939,13 @@ in
       ];
       # hermes-proton registers two toolsets: `proton_mail` (read) and
       # `proton_mail_write` (send, delete, upload, share, invite). Both are
-      # enabled now that an account is signed in. What bounds a write is not the
-      # toolset but three other things: the recipient allowlist (who may be
-      # written to at all -- it is NOT declared here; it comes from the
-      # hermes-proton-env sops secret via PROTON_ALLOWED_RECIPIENTS so the
-      # addresses never appear in this file, the store or config.yaml), the
+      # enabled now that an account is signed in (see agent.disabled_toolsets,
+      # declared empty above). What bounds a write is not the toolset but three
+      # other things: the recipient allowlist (who may be written to at all --
+      # deliberately not scalarised into
+      # plugins.entries."hermes-proton".settings.allowed_recipients; it comes
+      # from the hermes-proton-env sops secret via PROTON_ALLOWED_RECIPIENTS so
+      # the addresses never appear in this file, the store or config.yaml), the
       # plugin's own pre_tool_call gate, which requires approval for every send,
       # every event invitation that carries attendees, and the three deletions
       # that have no undo, and the escalation rule in approvals.smart_policy,
@@ -965,6 +977,15 @@ in
       agent = {
         max_turns = 90;
         gateway_timeout = 1800;
+        # Explicitly empty, not omitted. The activation script deep-merges these
+        # settings over the config.yaml on disk: Nix wins on values, but a key
+        # Nix stops declaring is never *deleted* from the file. Omitting this
+        # key leaves a stale list in place forever, so a toolset removed here
+        # would stay disabled through every rebuild (this is how the proton
+        # write toolset survived its own removal in #465). Declaring the empty
+        # list overwrites whatever is on disk. Re-enable a toolset by naming it
+        # here rather than by deleting the key.
+        disabled_toolsets = [ ];
         # Per-session overrides via `/reasoning [low|medium|high|xhigh]` still win.
         reasoning_effort = "medium";
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
