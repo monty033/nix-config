@@ -656,9 +656,9 @@ in
       homeAssistantHermesPlugin
       sessionResetPolicyHermesPlugin
       # Claude Pro/Max via the official Claude Code CLI. The default
-      # conversation route runs on the DeepSeek platform API directly, so this
-      # plugin supplies the subscription fallback route and the Claude aliases;
-      # Codex stays as the last, independent fallback.
+      # conversation route runs on the reseller gateway, so this plugin supplies
+      # the delegation route (Haiku), the subscription fallback route, and the
+      # Claude aliases; Codex stays as the last, independent fallback.
       claudeSubscriptionDirectsdkPlugin
       # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
       # the recipient allowlist comes from the hermes-proton-env sops secret
@@ -688,18 +688,19 @@ in
     ];
 
     settings = {
-      # Default conversation model is DeepSeek V4.1 Flash served directly by the
-      # DeepSeek platform API (provider `deepseek`), not through a reseller. The
-      # ID is `deepseek-flash`, which is what that provider's live /v1/models
-      # returns for this model; the reseller's `deepseek-v4.1-flash` spelling
-      # does not exist on it. No per-model compaction override is declared for it
-      # (see compression below), so it uses the global 300k cap like other
-      # models — deliberately short of its 1M window. GPT-6 Luna remains
-      # the native delegation model and an explicit alias (luna); explicit
-      # aliases preserve manual model selection when needed.
+      # Default conversation model is DeepSeek V4.1 Flash served through the
+      # OpenCode Go gateway (provider `opencode-go`), whose ID for it is
+      # `deepseek-v4.1-flash`. The platform API serves the same model under
+      # `deepseek-flash` instead, which is why the alias below spells that
+      # provider's ID rather than this one; the two spellings are not
+      # interchangeable across routes. No per-model compaction override is
+      # declared (see compression below), so it uses the global 300k cap like
+      # other models — deliberately short of its 1M window. Delegation runs
+      # Haiku (below); GPT-6 Luna stays an explicit alias (luna), because
+      # explicit aliases preserve manual model selection when needed.
       model = {
-        default = "deepseek-flash";
-        provider = "deepseek";
+        default = "deepseek-v4.1-flash";
+        provider = "opencode-go";
         # Luna's actual reasoning level is set via agent.reasoning_overrides
         # below ("gpt-6-luna" = "high"), not here — `model.reasoning_effort`
         # is not a recognized key in this section's schema and was a dead
@@ -715,24 +716,27 @@ in
           luna = "openai-codex/gpt-6-luna";
           sol = "openai-codex/gpt-6.1-sol";
           mm = "minimax/MiniMax-M3.1-Flash";
-          # The default conversation model, spelled the way the direct provider
-          # serves it. The `flash` name keeps pointing at whatever the default
-          # route is, so it follows this switch.
-          flash = "deepseek/deepseek-flash";
-          # Rollback lever: the reseller route the default used before the
-          # switch to the platform API. Select with `/model ocflash`.
-          ocflash = "opencode-go/deepseek-v4.1-flash";
+          # The default conversation model on its default route. The `flash`
+          # name keeps pointing at whatever the default route is.
+          flash = "opencode-go/deepseek-v4.1-flash";
+          # The platform API's route to the same model, kept credentialed and
+          # one command away: `/model dsflash`. Its ID on that provider is
+          # `deepseek-flash`, not the reseller spelling used above.
+          dsflash = "deepseek/deepseek-flash";
         };
       };
 
       # Native delegate_task controls (Bernie's delegation path).
-      # Workers share the parent's Codex pool; no delegation fallback is configured,
-      # so an outage can stop worker calls even when the main route has fallbacks.
-      # Medium is explicit and overrides parent/session effort for each child.
+      # Workers run Haiku on the subscription provider, a different provider from
+      # the conversation default; no delegation fallback is configured, so an
+      # outage there stops worker calls even when the main route has fallbacks.
+      # `reasoning_effort` replaces the inherited session effort for each child
+      # (tools/delegate_tool_config.py), so this key — not the per-model
+      # override below — decides worker effort.
       # Serial concurrency and depth 1 keep this pilot bounded and leaf-only.
       delegation = {
-        provider = "openai-codex";
-        model = "gpt-6-luna";
+        provider = "claude-subscription-directsdk-experimental";
+        model = "claude-haiku-5-5";
         reasoning_effort = "medium";
         max_concurrent_children = 1;
         max_spawn_depth = 1;
@@ -999,10 +1003,11 @@ in
         reasoning_effort = "medium";
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
-        # Luna is the native delegation model and explicitly uses high here;
-        # the default conversation model also uses high, declared under both the
-        # direct ID it is routed as and the reseller ID the ocflash alias
-        # resolves to, so the rollback lever keeps the same effort.
+        # The default conversation model uses high, declared under both the
+        # reseller ID it is routed as and the platform-API ID the dsflash alias
+        # resolves to, so switching between those routes keeps the same effort.
+        # Haiku's entry covers sessions that select Haiku directly; delegation
+        # children take their effort from `delegation.reasoning_effort` above.
         # The general route baseline remains medium, as does Sol by inheritance.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
