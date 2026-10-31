@@ -33,7 +33,16 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 812ff19. Since 009129b it adds: `nookctl`
+    # Pinned to NookBridge main at a145cf0. Since 812ff19 it adds: the
+    # operator socket serves one request per connection and resolves peers
+    # without blocking the event loop (#268); a custom service policy drops
+    # `notes.search` unless `notes.get` is also allowed, because search matches
+    # note bodies (#269); opaque placeholder tokens are keyed with an HMAC
+    # derived from the database key, so they no longer confirm a guess about
+    # withheld content (#270); and the security notes state that operator-group
+    # membership equals upload authority (#271).
+    #
+    # Earlier pin 812ff19: `nookctl`
     # exits 4 when `notes` or `tree` refuses categorically (denied, locked,
     # missing, conflict), so scripts no longer read a refusal as success (#265);
     # a notebook-less operator create now meets a `<root>` create-deny (#266);
@@ -62,7 +71,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=812ff19c446aa9f81d17348a4722badbd823043c";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=a145cf0d47b13739496b542aa7da5d07243a3194";
       flake = false;
     };
 
