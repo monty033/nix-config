@@ -197,16 +197,16 @@
     "nookbridge": {
       "flake": false,
       "locked": {
-        "lastModified": 1793447736,
-        "narHash": "sha256-amp7p9Ao8/CeWOb4xEuWlKy91lEx0m1tLbFo+nXz6+w=",
+        "lastModified": 1793455140,
+        "narHash": "sha256-/fu+cLEVRvMmCo7Vs2iNa6zOggmwdVuJX+jOFmrIhb8=",
         "ref": "refs/heads/main",
-        "rev": "812ff19c446aa9f81d17348a4722badbd823043c",
-        "revCount": 650,
+        "rev": "a145cf0d47b13739496b542aa7da5d07243a3194",
+        "revCount": 658,
         "type": "git",
         "url": "https://git.montycasa.net/patrick/NookBridge"
       },
       "original": {
-        "rev": "812ff19c446aa9f81d17348a4722badbd823043c",
+        "rev": "a145cf0d47b13739496b542aa7da5d07243a3194",
         "type": "git",
         "url": "https://git.montycasa.net/patrick/NookBridge"
       }
