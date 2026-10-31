@@ -33,7 +33,15 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 009129b, which adds terminal-confirmed
+    # Pinned to NookBridge main at 812ff19. Since 009129b it adds: `nookctl`
+    # exits 4 when `notes` or `tree` refuses categorically (denied, locked,
+    # missing, conflict), so scripts no longer read a refusal as success (#265);
+    # a notebook-less operator create now meets a `<root>` create-deny (#266);
+    # and the daemon socket drops operator-only method literals like unknown
+    # methods and answers an id-form get, append or update on a missing note
+    # as `permission_denied` (#267).
+    #
+    # Earlier pin 009129b: adds terminal-confirmed
     # operator upload approval (S7a-6, #254), opaque-block editing that keeps
     # notes with images, attachments or embeds editable (D6-1, #256), the
     # operator-only path diagnostic (#262), and multi-notebook authorization
@@ -54,7 +62,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=009129b571aaab68f411b07bc237fc88c947f030";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=812ff19c446aa9f81d17348a4722badbd823043c";
       flake = false;
     };
 
