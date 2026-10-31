@@ -265,11 +265,6 @@ let
     install -m 0555 ${../../../scripts/dns_migration/switch_dns_path.py} $out/dns_migration/switch_dns_path.py
   '';
   calendarPython = python312.withPackages (ps: [ ps.icalendar ]);
-  # The ghost-key pruner below needs YAML, and the agent runtime's package set
-  # is not the place to borrow it from: that set is assembled for the service,
-  # so a dependency added there would ship to the agent as well.
-  yamlPython = python312.withPackages (ps: [ ps.pyyaml ]);
-
   familyCalendarSource = ../../../scripts/calendar-publish/family-calendar-router;
   familyCalendarPublisher = pkgs.writeShellScriptBin "family-calendar-publisher" ''
     export PYTHON=${calendarPython}/bin/python3
@@ -1429,50 +1424,6 @@ in
       if ${pkgs.systemd}/bin/systemctl is-active --quiet calendar-sports-generate.timer; then
         ${pkgs.systemd}/bin/systemctl stop calendar-sports-generate.timer
       fi
-    '';
-
-  # One-time ghost cleanup. The activation merge updates and adds keys but never
-  # deletes one, so an alias removed from the declarative source survives in the
-  # mutable runtime config and stays selectable — that is how
-  # model.aliases.ocflash outlived the commit that dropped it. Remove only that
-  # one key, leave every other key as it is, and no-op once it is gone so a
-  # repeat activation is silent. Ordered after hermes-agent-setup, which performs
-  # the merge. Delete this block after one verified rebuild.
-  system.activationScripts.hermes-prune-stale-model-alias =
-    lib.stringAfter [ "hermes-agent-setup" ] ''
-      ${yamlPython}/bin/python3 - <<'PYEOF' || true
-      import sys
-
-      import yaml
-
-      CONFIG = "/var/lib/hermes/.hermes/config.yaml"
-      KEY_PATH = ("model", "aliases", "ocflash")
-
-      def main() -> int:
-          try:
-              with open(CONFIG) as handle:
-                  data = yaml.safe_load(handle) or {}
-          except FileNotFoundError:
-              return 0
-          node = data
-          for key in KEY_PATH[:-1]:
-              node = node.get(key) if isinstance(node, dict) else None
-          if not isinstance(node, dict) or KEY_PATH[-1] not in node:
-              print("prune-stale-alias: already absent")
-              return 0
-          node.pop(KEY_PATH[-1])
-          with open(CONFIG, "w") as handle:
-              yaml.safe_dump(data, handle, sort_keys=False, allow_unicode=True)
-          print("prune-stale-alias: removed " + ".".join(KEY_PATH))
-          return 0
-
-      if __name__ == "__main__":
-          try:
-              sys.exit(main())
-          except Exception as exc:
-              print("prune-stale-alias: skipped: " + str(exc), file=sys.stderr)
-              sys.exit(0)
-      PYEOF
     '';
 
   # SR-9: Hermes and every process it spawns (including the MCP server) are
