@@ -1270,6 +1270,29 @@ in
     find /var/lib/hermes/.hermes -maxdepth 3 \! -user hermes -exec chown hermes:users {} + 2>/dev/null || true
   '';
 
+  # The pinned nix-hermes-agent module declares /var/lib/hermes/.hermes as 2770 via
+  # systemd.tmpfiles.rules, and the gateway refuses to operate while that control
+  # directory is group-writable: it reports unsafe_control_permissions and every
+  # scheduled job dies, including the daily briefing. A host-side tmpfiles rule
+  # cannot override that declaration: for a duplicated path tmpfiles applies the
+  # first entry in the merged file and ignores later ones (tmpfiles.d(5), and
+  # systemd-tmpfiles logs "Duplicate line for path ..., ignoring"), and the
+  # module's entry precedes this host's — which is why this file's own
+  # `d .../.hermes/plugins 0750` rule leaves that directory live at 2770. The type
+  # is irrelevant to that ordering, so the mode is set in the gateway's own
+  # pre-start hook instead, which runs before the process on every start attempt.
+  # `chmod 2750` states the target mode outright rather than clearing one bit, so
+  # the setgid bit is set as well. Group write is not needed by any writer in this
+  # configuration: they run as hermes (the owner) or as root. The absolute path
+  # avoids depending on the unit's assembled PATH. This assumes the control
+  # directory stays owned by hermes, as the module's rule declares; under another
+  # owner the chmod fails, the pre-start hook fails and the unit refuses to start,
+  # and the postStart chown cannot rescue it because it runs after ExecStart.
+  # Revisit this line if a module bump relocates the directory.
+  systemd.services.hermes-agent.preStart = lib.mkAfter ''
+    ${pkgs.coreutils}/bin/chmod 2750 /var/lib/hermes/.hermes
+  '';
+
   systemd.tmpfiles.rules = [
     "d /var/lib/hermes/scripts 0755 hermes users -"
     "r /var/lib/hermes/scripts/bernie"
