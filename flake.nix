@@ -33,10 +33,15 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 0de82c9. Since 73b4e42 it adds: an empty
-    # sync drain now needs the database status to resolve to exactly `false`,
-    # so marks alone cannot start a wholesale upload, and `notes.sync` maps to
-    # the settings operation `edit` instead of `read` (SR-7, #273).
+    # Pinned to NookBridge main at 9da0537. Since 0de82c9 it adds: a SQLCipher
+    # key containing `"` or `\` is refused at every site that builds a `key=`
+    # pragma instead of being stripped, so a database is never opened with a
+    # passphrase the operator did not supply (SR-8, #274).
+    #
+    # Earlier pin 0de82c9: an empty sync drain now needs the database status to
+    # resolve to exactly `false`, so marks alone cannot start a wholesale
+    # upload, and `notes.sync` maps to the settings operation `edit` instead of
+    # `read` (SR-7, #273).
     #
     # Earlier pin 73b4e42: the operator credential helper reads the peer's
     # groups from SO_PEERGROUPS on the accepted socket instead of
@@ -82,7 +87,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=0de82c94e738f70f184a3b844339eadce6ab1269";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=9da0537099d92d71298c2cd180e7ab736d49a09f";
       flake = false;
     };
 
