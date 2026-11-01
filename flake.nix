@@ -33,11 +33,16 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 73b4e42. Since a145cf0 it adds: the
-    # operator credential helper reads the peer's groups from SO_PEERGROUPS on
-    # the accepted socket instead of `/proc/<pid>/status`, so the group list is
-    # the one the kernel captured when that peer connected and no longer
-    # follows whichever process holds the pid at lookup time (#272).
+    # Pinned to NookBridge main at 0de82c9. Since 73b4e42 it adds: an empty
+    # sync drain now needs the database status to resolve to exactly `false`,
+    # so marks alone cannot start a wholesale upload, and `notes.sync` maps to
+    # the settings operation `edit` instead of `read` (SR-7, #273).
+    #
+    # Earlier pin 73b4e42: the operator credential helper reads the peer's
+    # groups from SO_PEERGROUPS on the accepted socket instead of
+    # `/proc/<pid>/status`, so the group list is the one the kernel captured
+    # when that peer connected and no longer follows whichever process holds
+    # the pid at lookup time (#272).
     #
     # Earlier pin a145cf0: the
     # operator socket serves one request per connection and resolves peers
@@ -77,7 +82,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=73b4e420d7d4c62b96402922c9d823bc858ce96e";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=0de82c94e738f70f184a3b844339eadce6ab1269";
       flake = false;
     };
 
