@@ -6,13 +6,46 @@ onto a USB drive that lives in `stark`. These scripts are the gates around it.
 | script | runs on | purpose |
 |--------|---------|---------|
 | `rescue-build.sh` | hermes | drop the trigger file and wait for the root build unit; prints its status JSON |
-| `rescue-static-check.sh` | any checkout | assert the rescue config still has the properties the medium relies on (hostname, copytoram, sops key, tailscale ssh, root credentials) |
-| `rescue-status.sh` | agent/operator | compare the medium's `version.txt` with what the flake builds today |
+| `rescue-static-check.sh` | any checkout | assert the rescue config still has the properties the medium relies on (hostname, copytoram, sops key, tailscale ssh, root credentials) and that the flasher's write line is safe |
+| `rescue-status.sh` | agent/operator | compare the medium with what the flake builds today |
 | `rescue-boot-test.sh` | host with `/dev/kvm` | boot the ISO (or the medium) in QEMU with networking off; pass on `rescue login:` and zero `[FAILED]` units |
 | `rescue-flash.sh` | agent/operator | guarded write to the medium by pinned device serial, then sha256 read-back over the exact ISO length |
 
 Order: static check → status → build → boot-test the ISO → flash → boot-test the
-medium → receipt.
+medium → receipt. Nothing is current until the last step passes.
+
+## Refresh runbook
+
+```bash
+# 0. what is on the stick versus what this checkout would build
+scripts/rescue/rescue-static-check.sh
+scripts/rescue/rescue-status.sh --hash        # exit 3 means stale
+
+# 1. build through the root unit (no sudo needed, trigger only)
+scripts/rescue/rescue-build.sh                # prints status.json on success
+cat /var/lib/rescue/out/status.json           # commit, version, sha256, bytes
+
+# 2. boot-test the image itself, on a host with KVM
+scp /var/lib/rescue/out/rescue.iso root@stark:/var/tmp/rescue-under-test.iso
+scp scripts/rescue/rescue-boot-test.sh root@stark:/var/tmp/rbt.sh
+ssh root@stark 'chmod +x /var/tmp/rbt.sh &&
+  /var/tmp/rbt.sh --iso /var/tmp/rescue-under-test.iso --timeout 420'
+
+# 3. flash, with the receipt kept next to the previous ones
+scripts/rescue/rescue-flash.sh \
+  --iso /var/lib/rescue/out/rescue.iso \
+  --receipt /var/lib/hermes/workspace/rescue/receipts/flash-$(date +%Y%m%d).json
+
+# 4. boot-test the medium itself, then delete the scratch copies
+ssh root@stark '/var/tmp/rbt.sh \
+  --device /dev/disk/by-id/usb-Samsung_Flash_Drive_FIT_0360723110002277-0:0 --timeout 420'
+ssh root@stark 'rm -f /var/tmp/rescue-under-test.iso /var/tmp/rbt.sh'
+```
+
+Exit codes: `rescue-status.sh` 0 current / 3 stale / 2 error (including `--hash`
+when either side of the hash comparison is unavailable — it fails closed rather
+than grading on the version string alone). `rescue-flash.sh` 0 written and
+verified / 1 verification failure / 2 refused.
 
 ## Build
 
@@ -45,3 +78,43 @@ earlier layout is trusted, and the mirror is rebuilt from scratch each run.
 - Test boots use `-net none` so they never register a tailnet node, boot the
   medium read-only with `-snapshot`, and keep every temporary file in a private
   directory the script owns.
+- Keep a copy of the image that is on the stick before overwriting it. The
+  previous medium lives at `/var/lib/hermes/workspace/rescue/images/`; a flash
+  that fails verification leaves the stick unusable, and the copy is the only
+  rollback.
+
+## Postmortem: the write that truncated at 16 MB
+
+The first real flash (2026-11-02) wrote 16,023,552 bytes of a 1,631,322,112-byte
+image, exited 1 at the read-back, and left the stick unbootable until it was
+rewritten.
+
+Cause: the write was
+
+```bash
+ssh root@stark "dd of='$BYID' bs=4M conv=fsync iflag=count_bytes count=$ISO_BYTES" < "$ISO"
+```
+
+Reading from a pipe returns short reads (about 64 KB), and `dd` counts each of
+those as one input record. With `count=` set it stopped after `count` records
+rather than `count` bytes, so it stopped early and the remote `dd` exited
+cleanly. The read-back was the only thing that noticed.
+
+Fix: drop `count=`/`iflag=count_bytes` and read to EOF. The source file is
+exactly the image length, and the read-back over that same length proves what
+landed. `rescue-static-check.sh` now fails if a byte count reappears on the
+write line, so the pattern cannot return unnoticed.
+
+Lesson for any future change here: the write step fails silently and the loss is
+only visible at verification, by which point the medium is already destroyed.
+Treat every edit to the flash path as a change to the most dangerous command in
+the repo.
+
+## Automation
+
+`Rescue USB staleness check` (Hermes cron `b154b64f921c`) runs Mondays at 08:00
+and delivers to the Homelab topic. It runs
+`~/.hermes/scripts/rescue/rescue-weekly-check.sh`, which is silent while the
+medium matches the checkout, posts the version comparison when the medium is
+stale, and posts a failure notice if the check itself breaks. It never writes to
+the stick — stale means "run the runbook above", not "flash automatically".
