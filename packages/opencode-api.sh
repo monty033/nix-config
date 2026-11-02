@@ -13,12 +13,12 @@ auth_cfg() {
   fi
   sed -n 's/^OPENCODE_SERVER_PASSWORD=\(.*\)$/user = "opencode:\1"/p' "$SECRET_FILE"
 }
-api() { # api METHOD PATH [JSON]
-  local m=$1 p=$2 d=${3:-}
+api() { # api METHOD PATH [JSON] [MAX_SECONDS]
+  local m=$1 p=$2 d=${3:-} t=${4:-30}
   if [ -n "$d" ]; then
-    auth_cfg | curl -fsS -m 30 -K - -H 'Content-Type: application/json' -X "$m" "$BASE$p" -d "$d"
+    auth_cfg | curl -fsS -m "$t" -K - -H 'Content-Type: application/json' -X "$m" "$BASE$p" -d "$d"
   else
-    auth_cfg | curl -fsS -m 30 -K - -X "$m" "$BASE$p"
+    auth_cfg | curl -fsS -m "$t" -K - -X "$m" "$BASE$p"
   fi
 }
 die() { echo "opencode-api: $*" >&2; exit 2; }
@@ -58,6 +58,15 @@ opencode-api <cmd> [args]
   prompt SID "text" [--force]               send a prompt (async); --force permits non-bernie/ title
         To send the literal text --force, use: prompt SID --force --force
   wait SID [SECS]                         poll until the session is idle (default 600s)
+  watch SID [SECS]                        block on server events until the session needs attention
+        Prints one WAKE line and exits 0: "WAKE idle" (no turn was running for eight seconds,
+        or the session was found finished when the budget ran out), "WAKE permission.asked",
+        "WAKE form.created", "WAKE session.execution.succeeded|failed|interrupted",
+        "WAKE session.step.failed", "WAKE session.deleted".
+        Exit 3 if nothing woke it within SECS (default 1800, counted from the start of the
+        command), 2 if the event stream never opened or closed under it. A request carrying
+        no session id still wakes you, so re-check the permission list before acting on a
+        wake you cannot attribute. Ask it instead of polling on a timer.
   last SID [N]                            last N assistant text blocks (default 1)
   switch SID PROV/ID [VARIANT]            switch model/effort for subsequent turns
   deny SID                                (re)attach the free-model deny-list
@@ -148,6 +157,127 @@ case "$cmd" in
     done
     pend=$(api GET "/api/session/$sid/permission" | jq -r '.data|length') || pend=unknown
     printf 'state=%s pending_permissions=%s\n' "$(jq -rn --arg s "$st" "$ESC_DEFS"'$s|escfull')" "$(jq -rn --arg s "$pend" "$ESC_DEFS"'$s|escfull')" ;;
+  watch)
+    # Wait for the server to say something instead of asking it on a timer.
+    # Quiet by default: exactly one line, then exit, so a background job can
+    # wake on it. WAKE names are event names wherever an event has one.
+    [ $# -ge 1 ] && [ $# -le 2 ] || die "watch SID [SECS]"
+    sid=$1; max=${2:-1800}
+    valid_id "$sid" || die "invalid session id"
+    case "$max" in ''|*[!0-9]*) die "SECS must be a whole number of seconds" ;; esac
+    [ "$max" -ge 1 ] || die "SECS must be at least 1"
+    start=$SECONDS
+
+    # The budget is the whole command, not just the stream: the probes and the
+    # idle confirmations below spend from the same SECS a caller passes in.
+    remaining() { local r=$(( max - (SECONDS - start) )); [ "$r" -ge 1 ] || r=1; printf '%s' "$r"; }
+    # Server text reaches a terminal or a log, so it goes through the same
+    # escaping the rest of this file uses; @tsv alone does not cover C1.
+    esc() { printf '%s' "$1" | jq -Rr "$ESC_DEFS"'esctext'; }
+    count_of() { # count_of PATH WHAT - refuse an unexpected shape rather than count a hash
+      local n
+      n=$(api GET "$1" "" "$(remaining)" | jq -r '.data | if type=="array" then length else "invalid" end') \
+        || die "cannot read $2 for $sid"
+      [ "$n" != invalid ] || die "unexpected $2 payload for $sid"
+      printf '%s' "$n"
+    }
+    blocked() { # blocked - the two lists that mean a human is being waited on
+      # Each probe is checked by its own exit status: a die inside a command
+      # substitution ends only the subshell, never this one.
+      local p f
+      p=$(count_of "/api/session/$sid/permission" "pending permissions") || exit 2
+      [ "$p" -eq 0 ] || { printf 'WAKE permission.asked\n'; exit 0; }
+      f=$(count_of "/api/session/$sid/form" "pending forms") || exit 2
+      [ "$f" -eq 0 ] || { printf 'WAKE form.created\n'; exit 0; }
+    }
+
+    # A prompt returns as soon as the turn is accepted, so the event that ends a
+    # short turn can fire before this attaches. Answer from current state first.
+    blocked
+    # Idle is believed only after eight seconds in which no turn was seen running,
+    # matching what wait does: a turn not yet accepted is not finished.
+    attach=0
+    while :; do
+      st=$(api GET /api/session/active "" "$(remaining)" \
+        | jq -r --arg s "$sid" '.data[$s].type // "idle"') \
+        || die "cannot read session state from $BASE"
+      # A running turn means the interesting part has not happened yet: watch
+      # the stream rather than the state, or the why of the ending is lost.
+      [ "$st" = running ] && { attach=1; break; }
+      if [ "$st" = idle ] && [ $((SECONDS - start)) -ge 8 ]; then
+        # Re-read the human-blocking lists at the moment of the decision: a
+        # request raised during the confirmation must not read as nothing to do.
+        blocked
+        printf 'WAKE idle\n'; exit 0
+      fi
+      [ $((SECONDS - start)) -ge "$max" ] && break
+      [ "$st" = idle ] || { attach=1; break; }  # an unexpected state: let events explain it
+      sleep 1
+    done
+    if [ "$attach" != 1 ]; then
+      printf 'opencode-api: no wake event within %ss; the turn never started\n' "$max" >&2
+      exit 3
+    fi
+
+    # curl's own -m timeout is this command's normal exit path, so it is silent;
+    # a missing or refused credential is already caught by the probes above.
+    exec 3< <(auth_cfg | curl -sSN -m "$(remaining)" -K - -H 'Accept: text/event-stream' "$BASE/api/event" 2>/dev/null)
+    closed=0; last_type=none; buf=
+    while :; do
+      [ $((SECONDS - start)) -ge "$max" ] && break
+      before=$SECONDS
+      if IFS= read -r -t 30 line <&3; then
+        case "$line" in
+          '')  # a blank line ends an SSE frame; anything before it is the payload
+            [ -n "$buf" ] || continue
+            json=$buf; buf= ;;
+          data:*) buf="${buf}${buf:+$'\n'}${line#data: }"; continue ;;
+          *) continue ;;  # ": heartbeat" and other comment lines
+        esac
+        parsed=$(printf '%s' "$json" | jq -r '
+          .type as $t
+          | [$t, (.data.sessionID // ""),
+             (if ($t|test("^(permission\\.asked|form\\.created|session\\.execution\\.(succeeded|failed|interrupted)|session\\.step\\.failed|session\\.deleted)$")) then "1" else "0" end),
+             (((.data.action // .data.title // .data.reason // "") | tostring))
+            ] | @tsv') || parsed=
+        if [ -z "$parsed" ]; then
+          # Never drop a payload silently: a session blocked on a request whose
+          # shape changed would otherwise wait out the timeout with no trace.
+          printf 'opencode-api: unparsed event payload, ignored\n' >&2
+          continue
+        fi
+        IFS=$'\t' read -r type esid wake detail <<<"$parsed"
+        [ "$type" = server.connected ] && continue
+        last_type=$type
+        # A request that carries no session id is reported rather than dropped:
+        # waking on another session's question costs a look, dropping our own
+        # leaves it blocked with nobody watching.
+        if [ "$wake" = 1 ] && { [ "$esid" = "$sid" ] || [ -z "$esid" ]; }; then
+          printf 'WAKE %s\t%s\n' "$(esc "$type")" "$(esc "$detail")"
+          exit 0
+        fi
+        continue
+      fi
+      # read failed: either 30 quiet seconds or the stream ended. No time spent
+      # means the stream is at EOF, so this is not a timeout.
+      if [ $((SECONDS - before)) -lt 1 ]; then closed=1; break; fi
+    done
+    exec 3<&-
+    elapsed=$((SECONDS - start))
+    if [ "$closed" = 1 ]; then
+      die "event stream closed after ${elapsed}s; last event: $(esc "$last_type")"
+    fi
+    # The budget is spent. The turn may still have finished while we watched: a
+    # completion event lost between the state probe and the attach must not read
+    # as "nothing happened", so ask the session once before giving up.
+    blocked
+    st=$(api GET /api/session/active "" "$(remaining)" \
+      | jq -r --arg s "$sid" '.data[$s].type // "idle"') \
+      || die "cannot read session state from $BASE"
+    [ "$st" = idle ] && { blocked; printf 'WAKE idle\n'; exit 0; }
+    printf 'opencode-api: no wake event within %ss; last event: %s\n' "$elapsed" "$(esc "$last_type")" >&2
+    exit 3 ;;
+
   last) api GET "/api/session/${1:?sid}/message?order=desc&limit=20" | jq -r --argjson n "${2:-1}" \
         "$ESC_DEFS"'[.data[]|select(.type=="assistant")|.content[]?|select(.type=="text")|.text]|.[:$n]|reverse|.[]|esctext' ;;
   switch)
