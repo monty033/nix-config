@@ -1302,6 +1302,89 @@ in
     ${pkgs.coreutils}/bin/chmod 2750 /var/lib/hermes/.hermes
   '';
 
+  # The pinned nix-hermes-agent module's own activation snippet
+  # (`hermes-agent-setup`) chmods /var/lib/hermes/.hermes back to 2770, and its
+  # tmpfiles rule declares the same mode. The gateway refuses local-control
+  # discovery while that directory is group-writable by a shared group, so every
+  # agent-backed cron job dies with unsafe_control_permissions while `no_agent`
+  # script jobs keep running. That is the 2026-11-02 outage: the 04:58 activation
+  # reset the mode to 2770, the switch did not restart hermes-agent, the gateway's
+  # own preStart chmod therefore never re-ran, and the 05:25 and 06:00 agent jobs
+  # failed. Group write buys nothing here: every writer runs as hermes (the owner)
+  # or as root. 2750 keeps group read/execute and the setgid bit.
+  #
+  # Three layers, in the order they bite:
+  #
+  #  1. tmpfiles. For a duplicated path systemd-tmpfiles honours the first entry
+  #     it meets and processes files in name order, so this fragment — which sorts
+  #     before 00-nixos.conf ('00-h' < '00-n') — decides the mode for every
+  #     tmpfiles run, boot-time or manual. A plain `systemd.tmpfiles.rules` entry
+  #     cannot do it: it lands after the module's entry in 00-nixos.conf, which is
+  #     why this file's own `d .../.hermes/plugins 0750` rule leaves that
+  #     directory live at 2770. Deliberate side effect: this fragment also creates
+  #     the directory when it is absent, with the owner and mode the module
+  #     intends, so a boot that reaches tmpfiles first still gets hermes:users.
+  #  2. activation. This snippet runs after the module's because it names
+  #     `hermes-agent-setup` in `deps` (ordering verified against the generated
+  #     activation script). That name comes from the pinned module: if a bump
+  #     renames the snippet and nixpkgs ignores the unknown dependency, only the
+  #     ordering is lost, and layers 1 and 3 carry the mode on their own.
+  #  3. the running system. The timer reconciles the mode while the gateway runs,
+  #     because the unit's preStart hook above only repairs at start.
+  #     OnUnitInactiveSec re-arms from the unit's last deactivation rather than its
+  #     last activation, so a failed run does not stall the backstop the way
+  #     OnUnitActiveSec alone does.
+  environment.etc."tmpfiles.d/00-hermes-control.conf".text = ''
+    d /var/lib/hermes/.hermes 2750 hermes users - -
+  '';
+
+  # Deliberately no mkdir here: root `mkdir -p` follows a symlink in the final
+  # component, so it would let a replaced control path create a directory at a
+  # target the link names. The directory is someone else's to create — the module's
+  # snippet runs just above and, at boot, the tmpfiles fragment does. `-type d` is
+  # evaluated on the path itself (find does not follow symlinks by default), so a
+  # real directory gets the chown and mode, a missing one makes the snippet fail
+  # loudly instead of skipping, and a swapped-in symlink matches nothing: no
+  # chown, no chmod, exit 0 — the intended no-op, though it leaves no trace in the
+  # activation log. The chown re-asserts the ownership the module declares.
+  system.activationScripts.hermes-control-dir-mode = {
+    deps = [ "hermes-agent-setup" ];
+    text = ''
+      ${pkgs.findutils}/bin/find /var/lib/hermes/.hermes -maxdepth 0 -type d \
+        -exec ${pkgs.coreutils}/bin/chown hermes:users {} + \
+        -exec ${pkgs.coreutils}/bin/chmod 2750 {} +
+    '';
+  };
+
+  systemd.services.hermes-control-dir-mode = {
+    description = "Reconcile the Hermes control directory mode";
+    # An absent directory is a skip, not a failure. A chmod that genuinely fails
+    # (ownership drift, read-only /var) must still reach the journal, which a `-`
+    # prefix on ExecStart would hide.
+    unitConfig.ConditionPathExists = "/var/lib/hermes/.hermes";
+    serviceConfig = {
+      Type = "oneshot";
+      # The owner, not root: hermes can only ever chmod a path it owns, so a
+      # replaced control directory cannot make this unit retarget a mode or the
+      # setgid bit at somebody else's file, and drift surfaces as a failed run.
+      User = "hermes";
+      Group = "users";
+      ExecStart = "${pkgs.coreutils}/bin/chmod 2750 /var/lib/hermes/.hermes";
+      # 288 execs/day at default log level would bury the journal this host is
+      # diagnosed from; failures are logged as warnings, so they still surface.
+      LogLevelMax = "warning";
+    };
+  };
+
+  systemd.timers.hermes-control-dir-mode = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2min";
+      OnUnitInactiveSec = "5min";
+      Unit = "hermes-control-dir-mode.service";
+    };
+  };
+
   systemd.tmpfiles.rules = [
     "d /var/lib/hermes/scripts 0755 hermes users -"
     "r /var/lib/hermes/scripts/bernie"
