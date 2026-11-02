@@ -41,6 +41,13 @@ check "root has a password hash" 'true' \
   "$([ "$ROOT_HASH" != "null" ] && echo true || echo false)"
 check "ssh password auth" 'true' "$PW_AUTH"
 
+# The flasher streams the ISO into `dd` on stdin. A `count=`/`iflag=count_bytes`
+# combination there counts short pipe reads as blocks and silently truncates the
+# write, so the write path must run to EOF and let the read-back prove the size.
+WRITE_LINE=$(grep -h '^  "dd of=' "$REPO/scripts/rescue/rescue-flash.sh" || true)
+check "flash write has no byte count" 'true' \
+  "$([ -n "$WRITE_LINE" ] && ! echo "$WRITE_LINE" | grep -q 'count' && echo true || echo false)"
+
 # The checks above describe intent; print the effective values that matter for
 # a rescue session so a reviewer can see them without another eval.
 echo
