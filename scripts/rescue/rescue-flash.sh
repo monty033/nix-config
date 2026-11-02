@@ -108,8 +108,12 @@ fi
 # Re-check identity immediately before the write; the medium is the identity.
 check_target >/dev/null || { echo "REFUSED: identity changed before write"; exit 2; }
 echo "writing ..."
+# No `count=` here: reading a pipe gives short reads, and GNU dd counts those
+# as input blocks, so `count_bytes count=$ISO_BYTES` stopped after ~16 MB of a
+# 1.6 GB image. The source file is exactly ISO_BYTES, so read it to EOF and let
+# the read-back over the same length prove the result.
 ssh -o BatchMode=yes "root@$HOST" \
-  "dd of='$BYID' bs=4M conv=fsync iflag=count_bytes count=$ISO_BYTES status=progress" < "$ISO"
+  "dd of='$BYID' bs=4M conv=fsync status=progress" < "$ISO"
 ssh -o BatchMode=yes "root@$HOST" \
   "sync; blockdev --flushbufs '$BYID'; (partprobe '$BYID' 2>/dev/null || true); udevadm settle"
 
