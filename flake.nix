@@ -33,13 +33,21 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at bd42250. The operator socket listener now
-    # admits at most 64 connections, drops one that sends nothing for ten
-    # seconds, and drops any connection after a minute, so a local peer can no
-    # longer open connections without limit and keep them open indefinitely
-    # (#277). The idle timer is cleared once a request arrives, so a slow sync
-    # or upload is not mistaken for an idle peer; a refusal is a silent close
-    # with no new error surface, and the protocol is unchanged.
+    # Pinned to NookBridge main at 040f0f2. `notes.locked_note_proof` is now in
+    # the custom allowlist and is admitted only when the policy can evaluate a
+    # settings context, so a policy that admits only get, update and delete no
+    # longer reaches a diagnostic that exercises all three (#278). The note it
+    # probes is authorized over every notebook it belongs to, the proof is
+    # bound to the resolution that was authorized instead of resolving the path
+    # a second time, and a denied cross-listing answers as a missing note does.
+    #
+    # Earlier pin bd42250: the operator socket listener admits at most 64
+    # connections, drops one that sends nothing for ten seconds, and drops any
+    # connection after a minute, so a local peer cannot open connections
+    # without limit and keep them open indefinitely (#277). The idle timer is
+    # cleared once a request arrives, so a slow sync or upload is not mistaken
+    # for an idle peer; a refusal is a silent close, and the protocol is
+    # unchanged.
     #
     # Earlier pin ae79d6c: note authorization resolves a note's notebook paths
     # from a snapshot taken for that request instead of from the index built at
@@ -102,7 +110,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=bd422500945a8c44edae63c4ab0fd71a15b424a9";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=040f0f283b8b94ce576314edf3fe9ff6748df641";
       flake = false;
     };
 
