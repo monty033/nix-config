@@ -114,7 +114,14 @@ the repo.
 
 `Rescue USB staleness check` (Hermes cron `b154b64f921c`) runs Mondays at 08:00
 and delivers to the Homelab topic. It runs
-`~/.hermes/scripts/rescue/rescue-weekly-check.sh`, which is silent while the
-medium matches the checkout, posts the version comparison when the medium is
-stale, and posts a failure notice if the check itself breaks. It never writes to
-the stick — stale means "run the runbook above", not "flash automatically".
+`/var/lib/hermes/.hermes/scripts/rescue/rescue-weekly-check.py`, which is silent
+while the medium matches the checkout, posts the version comparison when the
+medium is stale, and posts a failure notice if the check itself breaks. It never
+writes to the stick — stale means "run the runbook above", not "flash
+automatically".
+
+The wrapper is Python rather than shell because the scheduler executes `.sh`
+jobs with `bash` from its own `PATH` and refuses them outright when that is
+missing; it shells out to `rescue-status.sh` with an explicit bash instead.
+Silence is the success signal: the job only speaks when the medium is stale or
+the check itself failed.
