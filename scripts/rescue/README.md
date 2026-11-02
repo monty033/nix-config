@@ -122,6 +122,8 @@ automatically".
 
 The wrapper is Python rather than shell because the scheduler executes `.sh`
 jobs with `bash` from its own `PATH` and refuses them outright when that is
-missing; it shells out to `rescue-status.sh` with an explicit bash instead.
-Silence is the success signal: the job only speaks when the medium is stale or
-the check itself failed.
+missing. It resolves bash explicitly (`shutil.which`, then
+`/run/current-system/sw/bin/bash`, then `/bin/bash`) and hands the status script
+a `PATH` that starts with the system profile, since the scheduler's own
+environment carries neither bash nor coreutils. Silence is the success signal:
+the job only speaks when the medium is stale or the check itself failed.
