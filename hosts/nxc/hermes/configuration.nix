@@ -1304,6 +1304,13 @@ in
 
   systemd.tmpfiles.rules = [
     "d /var/lib/hermes/scripts 0755 hermes users -"
+    # Rescue ISO build state, all root-owned except the trigger directory. The
+    # agent may only create `/var/lib/rescue/in/request`; it can neither rename
+    # the root-owned directories nor read the build directory.
+    "d /var/lib/rescue 0755 root root -"
+    "d /var/lib/rescue/build 0700 root root -"
+    "d /var/lib/rescue/out 0755 root root -"
+    "d /var/lib/rescue/in 1733 root root -"
     "r /var/lib/hermes/scripts/bernie"
     "L+ /var/lib/hermes/scripts/dns_migration - - - - ${hermes-scripts}/dns_migration"
     # The provider-quota quick command resolves its renderer as graph.sh beside
@@ -1449,6 +1456,203 @@ in
       Persistent = true;
       Unit = "calendar-sports-generate.service";
     };
+  };
+
+  # --- host rescue ISO ------------------------------------------------------
+  # The rescue ISO embeds /etc/sops/age/keys.txt, so evaluation (not just the
+  # build) requires root. The agent runs as hermes without sudo, so a root
+  # oneshot performs the build and the agent only drops a trigger file.
+  #
+  # Trust boundary: nothing the agent owns feeds the build. The unit fetches
+  # `master` into its own root-owned bare mirror using the Forgejo token, with
+  # system and global git config disabled, builds an extracted copy of that
+  # commit in a root-owned directory, and publishes only the ISO and a status
+  # file. The agent's trigger is a bare "run now"; it cannot choose a commit,
+  # a ref, or a tree.
+  systemd.services.rescue-iso-build = {
+    description = "Build the host rescue ISO from upstream master";
+    path = with pkgs; [ git nix gnutar coreutils findutils ];
+    environment = {
+      HOME = "/var/lib/rescue";
+      GIT_CONFIG_NOSYSTEM = "1";
+      GIT_CONFIG_SYSTEM = "/dev/null";
+      GIT_CONFIG_GLOBAL = "/dev/null";
+      GIT_TERMINAL_PROMPT = "0";
+      NIX_CONFIG = "experimental-features = nix-command flakes";
+    };
+    # /run/secrets is provided by the host, not by an in-container unit; the
+    # script checks the token file itself and fails with a readable status.
+    unitConfig = {
+      StartLimitIntervalSec = 300;
+      StartLimitBurst = 3;
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      User = "root";
+      TimeoutStartSec = 3600;
+      # Runs even when systemd kills the shell for a timeout, so a failed build
+      # always leaves a status file the agent can read.
+      ExecStopPost = toString (pkgs.writeShellScript "rescue-iso-status" ''
+        state=/var/lib/rescue
+        out=$state/out
+        build=$state/build
+        status=$out/status.json
+        # Never write through a symlinked state root or a symlinked or
+        # non-directory child.
+        if [ -L "$state" ] || [ ! -d "$state" ] \
+           || [ -L "$out" ] || [ ! -d "$out" ] \
+           || [ -L "$build" ] || [ ! -d "$build" ]; then
+          exit 0
+        fi
+        if [ -L "$status" ] || [ ! -f "$status" ] || [ ! -s "$status" ]; then
+          rm -rf "$status" 2>/dev/null || true
+          wrote=0
+          tmp=$(mktemp "$build/status.XXXXXX" 2>/dev/null) || tmp=""
+          if [ -z "$tmp" ]; then
+            tmp=$build/status.fallback
+            rm -rf "$tmp" 2>/dev/null || true
+            if ( set -o noclobber; : > "$tmp" ) 2>/dev/null; then wrote=1; fi
+          else
+            wrote=1
+          fi
+          if [ "$wrote" = 1 ]; then
+            printf '{"ok":false,"error":"build did not complete"}\n' > "$tmp" 2>/dev/null || true
+            chmod 0644 "$tmp" 2>/dev/null || true
+            mv -f "$tmp" "$status" 2>/dev/null || true
+          fi
+          if [ ! -s "$status" ]; then
+            echo "rescue-iso-build: could not publish $status" >&2
+          fi
+        fi
+      '');
+    };
+    script = ''
+      set -euo pipefail
+      state=/var/lib/rescue
+      build=$state/build
+      out=$state/out
+      mirror=$state/repo.git
+      token_file=${config.sops.secrets."forgejo-token".path}
+      src=""
+      cred=""
+      finish() {
+        rc=$?
+        if [ -n "$cred" ]; then rm -rf -- "$cred"; fi
+        if [ -n "$src" ]; then rm -rf -- "$src"; fi
+        if [ "$rc" -ne 0 ] && { [ -L "$out/status.json" ] || [ ! -f "$out/status.json" ] || [ ! -s "$out/status.json" ]; }; then
+          rm -rf -- "$out/status.json" 2>/dev/null || true
+          wrote=0
+          tmp=$(mktemp "$build/status.XXXXXX" 2>/dev/null) || tmp=""
+          if [ -z "$tmp" ]; then
+            tmp=$build/status.fallback
+            rm -rf -- "$tmp" 2>/dev/null || true
+            if ( set -o noclobber; : > "$tmp" ) 2>/dev/null; then wrote=1; fi
+          else
+            wrote=1
+          fi
+          if [ "$wrote" = 1 ]; then
+            printf '{"ok":false,"rc":%s,"error":"build failed"}\n' "$rc" > "$tmp" 2>/dev/null || true
+            chmod 0644 "$tmp" 2>/dev/null || true
+            mv -f "$tmp" "$out/status.json" 2>/dev/null || true
+          fi
+          if [ ! -s "$out/status.json" ]; then
+            echo "rescue-iso-build: could not publish $out/status.json" >&2
+          fi
+        fi
+        exit "$rc"
+      }
+
+      # Nothing pre-existing under the state root is trusted. Check the type of
+      # every directory before any write (so a symlinked state root or symlinked
+      # `in`/`out`/`build` is never followed), then repair ownership and mode:
+      # tmpfiles `d` creates a missing directory but never repairs an existing
+      # one.
+      for d in "$state" "$state/in" "$state/out" "$state/build"; do
+        if [ -L "$d" ] || { [ -e "$d" ] && [ ! -d "$d" ]; }; then
+          echo "refusing: $d is not a plain directory" >&2
+          exit 1
+        fi
+      done
+      install -d -m 0755 -o root -g root "$state"
+      install -d -m 0755 -o root -g root "$out"
+      install -d -m 0700 -o root -g root "$build"
+      install -d -m 1733 -o root -g root "$state/in"
+
+      # Clear the previous result before anything else can fail, so a stale
+      # status can never be mistaken for this run's outcome. The trap goes in
+      # only after the directories are known to be plain and correctly owned.
+      rm -rf -- "$out/status.json" "$out/rescue.iso" "$out/rescue.iso.new"
+      trap finish EXIT
+
+      # Nix reads $HOME/.config/nix/nix.conf before NIX_CONFIG, so the build
+      # gets a fresh root-owned home inside the (0700) build directory instead
+      # of the state root.
+      home=$build/home
+      rm -rf -- "$home"
+      install -d -m 0700 -o root -g root "$home"
+      export HOME="$home"
+      export XDG_CONFIG_HOME="$home/.config"
+
+      # Claim the trigger before anything that can fail. `mv` moves files and
+      # directories alike; `rm -rf` only removes the entry, never a target.
+      if [ -e "$state/in/request" ]; then
+        mv -f "$state/in/request" "$build/request.$$" 2>/dev/null ||
+          rm -rf "$state/in/request" || true
+      fi
+
+      [ -r "$token_file" ] || { echo "cannot read forgejo token" >&2; exit 1; }
+      umask 077
+      cred=$build/cred
+      rm -rf -- "$cred"
+      ( set -o noclobber; printf 'https://x-access-token:%s@git.montycasa.net\n' "$(cat "$token_file")" > "$cred" )
+
+      # The mirror is rebuilt from scratch every run: a bare repository left by
+      # an older layout could carry local config or hooks that the fetch would
+      # trust. `rm -rf` removes a symlink entry, never its target.
+      rm -rf "$mirror"
+      git init --quiet --bare "$mirror"
+      git --git-dir="$mirror" remote add origin https://git.montycasa.net/patrick/nix-config.git
+      git --git-dir="$mirror" -c credential.helper="store --file=$cred" \
+        fetch --quiet --no-tags --depth=1 origin \
+        +refs/heads/master:refs/remotes/origin/master
+      rm -f "$cred"; cred=""
+      sha=$(git --git-dir="$mirror" rev-parse refs/remotes/origin/master)
+
+      src=$(mktemp -d "$build/src.XXXXXX")
+      git --git-dir="$mirror" archive --format=tar "$sha" | tar --no-same-owner -x -C "$src"
+      if [ -n "$(find "$src" -type l -print -quit)" ]; then
+        echo "refusing to build a tree containing symlinks" >&2
+        exit 1
+      fi
+      cd "$src"
+      nix build --impure --no-write-lock-file \
+        '.#nixosConfigurations.rescue.config.system.build.isoImage' \
+        --out-link "$build/current"
+      iso=$(ls "$build"/current/iso/*.iso | head -1)
+      rm -rf -- "$out/rescue.iso.new"
+      install -m 0644 "$iso" "$out/rescue.iso.new"
+      mv -f "$out/rescue.iso.new" "$out/rescue.iso"
+      version=$(basename "$iso" .iso)
+      version=''${version%-x86_64-linux}
+      # The label may or may not carry a flavour prefix (`nixos-minimal-...` or
+      # plain `nixos-...`), so take the version token itself instead of
+      # stripping a prefix that may not exist.
+      parsed=$(printf '%s\n' "$version" | ${pkgs.gnugrep}/bin/grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9a-f]+' | head -1 || true)
+      if [ -n "$parsed" ]; then version=$parsed; fi
+      tmp=$(mktemp "$build/status.XXXXXX")
+      printf '{"ok":true,"commit":"%s","version":"%s","sha256":"%s","bytes":%s,"built_at":"%s"}\n' \
+        "$sha" "$version" "$(sha256sum "$out/rescue.iso" | cut -d' ' -f1)" \
+        "$(stat -c %s "$out/rescue.iso")" "$(date -Iseconds)" > "$tmp"
+      chmod 0644 "$tmp"
+      mv -f "$tmp" "$out/status.json"
+    '';
+  };
+
+  # Touch /var/lib/rescue/in/request to start a build. The service moves the
+  # request out of `in/` first, so a stale trigger cannot loop.
+  systemd.paths.rescue-iso-build = {
+    wantedBy = [ "multi-user.target" ];
+    pathConfig.PathExists = "/var/lib/rescue/in/request";
   };
 
   # A prior generation may have left the legacy timer active even after its
