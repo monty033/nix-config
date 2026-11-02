@@ -86,22 +86,21 @@ git-rpull remote:
   ssh root@{{remote}} "cd /etc/nixos && git pull https://github.com/monty033/nix-config.git"
 
 rescue-build:
-  nix build .#nixosConfigurations.rescue.config.system.build.isoImage --impure
+  bash scripts/rescue/rescue-build.sh
 
-rescue-flash device:
-  sudo dd if=$(ls result/iso/*.iso) of={{device}} bs=4M status=progress conv=fsync
+rescue-status:
+  bash scripts/rescue/rescue-status.sh
 
-rescue-build-flash device: rescue-build
-  just rescue-flash {{device}}
+# Writes the published ISO; the device identity (serial) is pinned in the script.
+rescue-flash host:
+  bash scripts/rescue/rescue-flash.sh --host {{host}} --iso /var/lib/rescue/out/rescue.iso
 
-rescue-flash-remote host device:
-  cat result/iso/*.iso | ssh root@{{host}} "dd of={{device}} bs=4M status=progress conv=fsync"
+rescue-update host: rescue-build
+  just rescue-flash {{host}}
 
-rescue-build-flash-remote host device: rescue-build
-  just rescue-flash-remote {{host}} {{device}}
-
-rescue-test:
-  nix shell nixpkgs#qemu --command sudo qemu-system-x86_64 -m 4G -enable-kvm -cpu host -drive file=/dev/sda,format=raw,if=virtio
+# Boot the published ISO in QEMU with networking off; passes on a rescue login prompt.
+rescue-test iso="/var/lib/rescue/out/rescue.iso":
+  sudo bash scripts/rescue/rescue-boot-test.sh --iso {{iso}}
 
 ap host tags="all" vars="":
   ansible-playbook ansible/playbooks/host_{{host}}.yml --tags "{{tags}}" -e "{{vars}}"
