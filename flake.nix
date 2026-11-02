@@ -126,6 +126,7 @@
       opencode-claude = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-claude.nix { };
       opencode-goal-plugin = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-goal-plugin.nix { };
       opencode-api = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-api.nix { };
+      provider-usage-graph = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/provider-usage-graph.nix { };
     };
 
     # `nix fmt` formats the tree with this.

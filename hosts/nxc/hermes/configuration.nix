@@ -265,6 +265,15 @@ let
     install -m 0555 ${../../../scripts/dns_migration/switch_dns_path.py} $out/dns_migration/switch_dns_path.py
   '';
   calendarPython = python312.withPackages (ps: [ ps.icalendar ]);
+  # /myusage renders its chart with matplotlib. Building the renderer puts the
+  # interpreter, matplotlib and the script into one closure, so the quick
+  # command runs no nix evaluation and downloads nothing at call time. The
+  # wrapper it replaces shelled out to nix-shell with a pinned nixpkgs source
+  # path; that path no longer exists, so nix warns "Nix search path entry ...
+  # does not exist, ignoring", resolves nixpkgs another way, and instantiates
+  # and fetches the whole Python closure on every call. That cold path is where
+  # the command reported the chart as unavailable.
+  providerUsageGraph = pkgs.callPackage ../../../packages/provider-usage-graph.nix { };
   familyCalendarSource = ../../../scripts/calendar-publish/family-calendar-router;
   familyCalendarPublisher = pkgs.writeShellScriptBin "family-calendar-publisher" ''
     export PYTHON=${calendarPython}/bin/python3
@@ -1297,6 +1306,10 @@ in
     "d /var/lib/hermes/scripts 0755 hermes users -"
     "r /var/lib/hermes/scripts/bernie"
     "L+ /var/lib/hermes/scripts/dns_migration - - - - ${hermes-scripts}/dns_migration"
+    # The provider-quota quick command resolves its renderer as graph.sh beside
+    # myusage.sh. Point that name at the packaged renderer so the chart cannot
+    # depend on a runtime nix-shell; L+ replaces the previous mutable copy.
+    "L+ /var/lib/hermes/.hermes/scripts/provider-quota/graph.sh - - - - ${providerUsageGraph}/bin/provider-usage-graph"
     "z /var/lib/hermes/.hermes/.env 0600 hermes users -"
     "d /var/lib/hermes/.local 0700 hermes users -"
     "d /var/lib/hermes/.local/state 0700 hermes users -"
