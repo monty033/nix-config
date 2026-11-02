@@ -33,10 +33,18 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 9da0537. Since 0de82c9 it adds: a SQLCipher
-    # key containing `"` or `\` is refused at every site that builds a `key=`
-    # pragma instead of being stripped, so a database is never opened with a
-    # passphrase the operator did not supply (SR-8, #274).
+    # Pinned to NookBridge main at ae79d6c. Note authorization now resolves a
+    # note's notebook paths from a snapshot taken for that request instead of
+    # from the index built at startup, so renaming or moving a notebook into a
+    # denied path takes effect immediately rather than at the next restart; a
+    # snapshot that cannot be built is answered as `service_unavailable` (#276).
+    # The pin also carries a documentation-only update to the remediation table
+    # (#275), which changes no behaviour.
+    #
+    # Earlier pin 9da0537: a SQLCipher key containing `"` or `\` is refused at
+    # every site that builds a `key=` pragma instead of being stripped, so a
+    # database is never opened with a passphrase the operator did not supply
+    # (SR-8, #274).
     #
     # Earlier pin 0de82c9: an empty sync drain now needs the database status to
     # resolve to exactly `false`, so marks alone cannot start a wholesale
@@ -87,7 +95,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=9da0537099d92d71298c2cd180e7ab736d49a09f";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=ae79d6cfc5f2b68f52a388eea2ed9d280931b2b2";
       flake = false;
     };
 
