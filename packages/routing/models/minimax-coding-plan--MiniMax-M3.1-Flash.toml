@@ -1,0 +1,6 @@
+id      = "minimax-coding-plan/MiniMax-M3.1-Flash"
+variant = ""
+tiers   = { slice = 2, review = 1 }
+free    = false
+checked = 2026-11-02
+why     = "slice fallback on Patrick's MiniMax plan; cross-vendor reviewer for Go work"

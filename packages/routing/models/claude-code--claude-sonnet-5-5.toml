@@ -1,0 +1,6 @@
+id      = "claude-code/claude-sonnet-5-5"
+variant = "high"
+tiers   = { security = 1 }
+free    = false
+checked = 2026-11-02
+why     = "auth, permissions, data loss or deployment boundary; needs an independent review"

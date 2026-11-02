@@ -1,0 +1,6 @@
+id      = "claude-code/claude-haiku-5-5"
+variant = "high"
+tiers   = { cross_module = 1 }
+free    = false
+checked = 2026-11-02
+why     = "invariants that cross module boundaries, with tests covering them"

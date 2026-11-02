@@ -1,0 +1,6 @@
+id      = "claude-code/claude-opus-5-5[1m]"
+variant = "high"
+tiers   = { plan = 1 }
+free    = false
+checked = 2026-11-02
+why     = "planning and architecture; confirm with Patrick before opening the session"

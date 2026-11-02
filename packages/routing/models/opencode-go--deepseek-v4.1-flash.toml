@@ -1,0 +1,6 @@
+id      = "opencode-go/deepseek-v4.1-flash"
+variant = "high"
+tiers   = { slice = 1 }
+free    = false
+checked = 2026-11-02
+why     = "default step up for bounded multi-file work with tests"
