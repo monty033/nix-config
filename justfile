@@ -48,6 +48,7 @@ test:
   python3 -m unittest \
     tests.test_dns_migration \
     tests.test_nix_pr \
+    tests.test_oc_tier \
     tests.test_pihole_audit \
     tests.test_pihole_baseline \
     tests.test_pihole_deploy_setup_reconcile \

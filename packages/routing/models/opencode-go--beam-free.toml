@@ -1,0 +1,6 @@
+id      = "opencode-go/beam-free"
+variant = "low"
+tiers   = { mechanical = 1 }
+free    = true
+checked = 2026-11-02
+why     = "top free route that answers on Go; Zen free models return zero tokens"

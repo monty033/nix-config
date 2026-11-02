@@ -20,6 +20,10 @@ let
   opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
   opencode-goal-plugin = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-goal-plugin;
   opencode-api = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-api;
+  # Tier dispatcher. Its base roster is a separate artifact, installed read-only
+  # at /etc/hermes/routing/models below; a local overlay may extend or override
+  # any entry per model id.
+  oc-tier = pkgs.callPackage ../../../packages/oc-tier.nix { inherit opencode-api; };
   opencode-server-config = pkgs.writeText "opencode-server-config.json" (builtins.toJSON {
     plugins = [
       "${opencode-claude}/lib/node_modules/@openchamber/opencode-claude"
@@ -515,6 +519,7 @@ in
     pkgs-unstable.codex
     opencode-v2
     opencode-api
+    oc-tier
     graphviz
     tmux
     pkgs.jq
@@ -1334,6 +1339,13 @@ in
   #     OnUnitInactiveSec re-arms from the unit's last deactivation rather than its
   #     last activation, so a failed run does not stall the backstop the way
   #     OnUnitActiveSec alone does.
+  # Base model inventory for the tier dispatcher: read-only, part of the
+  # generation, and installed independently of the oc-tier package. Extend or
+  # override it per model id in /var/lib/hermes/.hermes/routing/models; a local
+  # entry replaces the base entry of the same id whole. The base governs where no
+  # local entry exists, so an id listed in both is the local one's.
+  environment.etc."hermes/routing/models".source = ../../../packages/routing/models;
+
   environment.etc."tmpfiles.d/00-hermes-control.conf".text = ''
     d /var/lib/hermes/.hermes 2750 hermes users - -
   '';
