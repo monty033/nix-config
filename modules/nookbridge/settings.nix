@@ -53,6 +53,15 @@ let
 
   settingsType = types.submodule {
     options = {
+      upload = mkOption {
+        type = types.enum [ "attributed" "allow" ];
+        default = "attributed";
+        description = ''
+          Whether a sync may upload queued changes that cannot be attributed to
+          the MCP writer. `attributed` keeps the strict marker gate; `allow`
+          releases the queue, which uploads the vault as a whole.
+        '';
+      };
       defaults = mkOption {
         type = settingsDefaultsType;
         default = { };
@@ -96,6 +105,7 @@ let
     (builtins.concatStringsSep "\n" [
       "{"
       "  \"version\": 1,"
+      "  \"upload\": ${builtins.toJSON settings.upload},"
       "  \"defaults\": {"
       "    \"read\": ${builtins.toJSON defaults.read},"
       "    \"edit\": ${builtins.toJSON defaults.edit},"

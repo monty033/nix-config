@@ -425,6 +425,10 @@ in
     # Keep the deployed policy declarative in Nix rather than sourcing JSON.
     settingsFile = null;
     settings = {
+      # A sync transports the whole vault queue, so its release is a vault-wide
+      # decision rather than a per-note one. `allow` lets `notes.sync` flush what
+      # the Notesnook app queued without a root operator run (#281).
+      upload = "allow";
       defaults = {
         read = true;
         edit = true;

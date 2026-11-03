@@ -33,7 +33,12 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 040f0f2. `notes.locked_note_proof` is now in
+    # Pinned to NookBridge main at 05a9ac6a. `notes.sync` may flush the durable
+    # queue when the install sets the optional `upload` key, so a note edited in
+    # the Notesnook app no longer waits for a root operator run; the default
+    # stays `attributed`, which keeps the strict marker gate (#281).
+    #
+    # Previous pin 040f0f2: `notes.locked_note_proof` is in
     # the custom allowlist and is admitted only when the policy can evaluate a
     # settings context, so a policy that admits only get, update and delete no
     # longer reaches a diagnostic that exercises all three (#278). The note it
@@ -110,7 +115,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=040f0f283b8b94ce576314edf3fe9ff6748df641";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=05a9ac6a6e92f397d4b06b835c9a206ccc4e4dc2";
       flake = false;
     };
 
