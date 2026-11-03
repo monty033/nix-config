@@ -450,8 +450,9 @@ in
     [ config.services.hermes-agent.package ]
     ++ config.services.hermes-agent.extraPlugins
     # The Hermes module merges settings into mutable config.yaml during
-    # activation. Restart when the memory, voice, or routing settings change so
-    # a provider cutover is effective without a manual systemctl command.
+    # activation. Restart when the memory, voice, MCP, webapp, or routing
+    # settings change so a provider cutover or a new listener is effective
+    # without a manual systemctl command.
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.memory)
       (builtins.toJSON config.services.hermes-agent.settings.tts)
@@ -473,6 +474,9 @@ in
     ]
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
+      # The webapp block is what makes the gateway bind 9120 at all, so it
+      # needs the same restart treatment as the other settings blocks.
+      (builtins.toJSON config.services.hermes-agent.settings.webapp)
       # The identity file is installed at activation, but the gateway must
       # restart to load its new instructions after a SOUL.md change.
       (builtins.hashString "sha256" config.services.hermes-agent.hermesHomeFiles."SOUL.md")
@@ -611,7 +615,7 @@ in
     # reads. Pin the release version so version-gated plugins (homeassistant
     # requires >=0.21.5) load. Keep this in sync with the nix-hermes-agent
     # pin in flake.nix.
-    package = pkgs.hermes-agent.override { version = "0.22.4"; };
+    package = pkgs.hermes-agent.override { version = "0.22.6"; };
     addToSystemPackages = true;
     extraDependencyGroups = [ "messaging" "anthropic" "voice" ];
 
@@ -997,9 +1001,12 @@ in
       # autodetection. Keenable's extraction backend needs no API key.
       web.extract_backend = "keenable";
 
-      # The v0.19 migration is blocked in Nix-managed mode. Declare its schema
-      # marker here; the disposable migration lab validated this is sufficient.
-      _config_version = 33;
+      # The schema marker is Nix-owned, so activation cannot rewind the file to
+      # an older version and re-trigger migrations on every rebuild. The
+      # disposable migration lab ran the 0.22.6 chain (33 -> 52) against a copy
+      # of the live config: 19 steps, zero new keys, and the only semantic
+      # change was this stamp — every other diff line was YAML re-serialization.
+      _config_version = 52;
 
       # Persist delivery obligations before platform sends; this is a durable
       # reliability boundary, not a one-off runtime default.
@@ -1242,6 +1249,24 @@ in
       checkpoints = {
         enabled = true;
         auto_prune = true;
+      };
+
+      # Browser-served Desktop, released in 0.22.6. The listener belongs to the
+      # gateway, not to the dashboard on 9119, which is a separate surface.
+      # The package builds the bundle into the store and points
+      # HERMES_WEBAPP_DIST at it, so `hermes webapp` never writes to the
+      # read-only store. The listener accepts only a loopback or wildcard host
+      # (see gateway/webapp_listener.py), which is why 0.0.0.0 is used here and
+      # eth0:9120 is opened for the local-proxy hop. Any non-loopback bind,
+      # this one included, is gated by dashboard sign-in. public_url only tells
+      # that sign-in flow which address a proxy serves: it is not a hostname
+      # allowlist, so a direct LAN-IP request is answered and stopped by the
+      # sign-in gate, not by host matching.
+      webapp = {
+        enabled = true;
+        host = "0.0.0.0";
+        port = 9120;
+        public_url = "https://hermes.montycasa.net";
       };
 
     };
