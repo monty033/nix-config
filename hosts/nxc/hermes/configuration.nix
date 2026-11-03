@@ -477,6 +477,12 @@ in
       # The webapp block is what makes the gateway bind 9120 at all, so it
       # needs the same restart treatment as the other settings blocks.
       (builtins.toJSON config.services.hermes-agent.settings.webapp)
+      # The mascot selector is part of settings.display, which sits beside the
+      # per-platform rendering options. Without this trigger the activation
+      # merge rewrites config.yaml while the running gateway keeps the pet it
+      # started with; the shared blob also means a per-platform display tweak
+      # cycles the unit.
+      (builtins.toJSON config.services.hermes-agent.settings.display)
       # The identity file is installed at activation, but the gateway must
       # restart to load its new instructions after a SOUL.md change.
       (builtins.hashString "sha256" config.services.hermes-agent.hermesHomeFiles."SOUL.md")
@@ -1139,6 +1145,15 @@ in
             enabled = false;
           };
           cleanup_progress = true;
+        };
+
+        # The petdex mascot selector. Only the selector is declared here: the
+        # artwork is runtime state in the application's home directory,
+        # installed by the application's own pet commands, so it is not built
+        # from this repository.
+        pet = {
+          enabled = true;
+          slug = "bernie";
         };
       };
 
