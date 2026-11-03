@@ -3,6 +3,7 @@
 let
   spec = import ../modules/nookbridge/settings.nix { inherit lib; };
   inline = {
+    upload = "allow";
     defaults = {
       read = true;
       edit = true;
@@ -35,6 +36,7 @@ let
   expectedDefaultsOrder = ''
     {
       "version": 1,
+      "upload": "allow",
       "defaults": {
         "read": true,
         "edit": true,
@@ -47,6 +49,7 @@ let
 in
 pkgs.runCommand "nookbridge-settings-module-check" { } ''
   test ${builtins.toString (if rendered.version == 1 then 1 else 0)} = 1
+  test ${builtins.toString (if rendered.upload == "allow" then 1 else 0)} = 1
   test ${builtins.toString (if rendered.defaults.edit then 1 else 0)} = 1
   test ${builtins.toString (if rendered.overrides == [
     { notebooks = [ "Financial" ]; delete = false; }

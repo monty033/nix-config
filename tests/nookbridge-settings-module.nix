@@ -52,6 +52,9 @@ let
   inlineSettingsContent = sourceSpec.renderSettings inlineSettings.settings;
   fileSettingsContent = builtins.readFile ../modules/nookbridge/settings.json;
   inlineJson = builtins.fromJSON inlineSettingsContent;
+  allowJson = builtins.fromJSON (
+    sourceSpec.renderSettings (inlineSettings.settings // { upload = "allow"; })
+  );
   fileJson = builtins.fromJSON (builtins.readFile fileSettingsEtc.source);
   inlineRestartTriggers = inlineCfg.systemd.services.nookd.restartTriggers;
   fileRestartTriggers = fileCfg.systemd.services.nookd.restartTriggers;
@@ -83,9 +86,12 @@ pkgs.runCommand "nookbridge-settings-module-integration-check" {
   test ${builtins.toString (if inlineJson.defaults.edit then 1 else 0)} = 1
   ${pkgs.jq}/bin/jq -e '
     .version == 1 and
+    .upload == "attributed" and
     .defaults == {read: true, edit: true, create: false, delete: false} and
     .overrides == [{notebooks: ["Financial"], delete: false}]
   ' ${inlineSettingsEtc.source} > /dev/null
+  test ${builtins.toString (if allowJson.upload == "allow" then 1 else 0)} = 1
+  ${pkgs.jq}/bin/jq -e '.upload == null' ${fileSettingsEtc.source} > /dev/null
   test ${builtins.toString (if fileJson.defaults.delete then 1 else 0)} = 1
   ${pkgs.jq}/bin/jq -e '.overrides == [{notebooks: ["Financial"], delete: false}]' ${fileSettingsEtc.source} > /dev/null
   test ${builtins.toString (if builtins.elem inlineSettingsContent inlineRestartTriggers then 1 else 0)} = 1
