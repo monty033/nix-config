@@ -656,10 +656,12 @@ in
       # or the disposable plugin virtualenv.
       MNEMOSYNE_HOME = "/var/lib/hermes/.hermes/mnemosyne";
 
-      # WhatsApp self-chat is enabled declaratively. The personal allowlist
-      # remains in the SOPS-backed openclaw-env as WHATSAPP_ALLOWED_USERS.
-      WHATSAPP_ENABLED = "true";
-      WHATSAPP_MODE = "self-chat";
+      # WhatsApp is intentionally unconfigured. No Node.js bridge is installed
+      # here, so an enabled adapter cannot be constructed — which is what made
+      # the gateway report the platform as broken. The plugin opts in only when
+      # WHATSAPP_ENABLED is true/1/yes, so leaving it unset keeps WhatsApp off.
+      # WHATSAPP_ALLOWED_USERS in the encrypted environment file is inert while
+      # the platform is off; drop it there when that file is next edited.
 
       # Mattermost — MATTERMOST_URL must be an env var: when MATTERMOST_TOKEN
       # is set, gateway/config.py overwrites platforms.mattermost.extra.url
