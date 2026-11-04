@@ -496,6 +496,11 @@ in
       # started with; the shared blob also means a per-platform display tweak
       # cycles the unit.
       (builtins.toJSON config.services.hermes-agent.settings.display)
+      # Platform blocks (webhook routes, platform extras) are merged into the
+      # mutable config the same way, so a platform change needs the same
+      # treatment: without this trigger the merge rewrites config.yaml while
+      # the running gateway keeps the platform tables it started with.
+      (builtins.toJSON config.services.hermes-agent.settings.platforms)
       # The identity file is installed at activation, but the gateway must
       # restart to load its new instructions after a SOUL.md change.
       (builtins.hashString "sha256" config.services.hermes-agent.hermesHomeFiles."SOUL.md")
@@ -1288,6 +1293,50 @@ in
     documents."SOUL.md" = builtins.readFile ./documents/SOUL.md;
     hermesHomeFiles."SOUL.md" = builtins.readFile ./documents/SOUL.md;
   };
+
+  # One-time cleanup of the retired Telegram topic declaration. The upstream
+  # hermes-config-merge only adds and overwrites keys, so removing
+  # platforms.telegram from the Nix source left the old block in the mutable
+  # config. This deletes that block (or just its two stale keys, if a later
+  # change ever adds anything else there) and is a no-op once it is gone.
+  # Remove this activation step after one successful rebuild has verified it.
+  system.activationScripts.hermes-prune-stale-telegram-topics =
+    lib.stringAfter [ "hermes-agent-setup" ] ''
+      hermes_cfg=/var/lib/hermes/.hermes/config.yaml
+      if [ -f "$hermes_cfg" ]; then
+        # Non-fatal: a failure here warns and never blocks activation.
+        ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -c '
+import sys, yaml
+from pathlib import Path
+p = Path(sys.argv[1])
+try:
+    data = yaml.safe_load(p.read_text())
+    if not isinstance(data, dict):
+        raise SystemExit(0)
+    platforms = data.get("platforms")
+    telegram = platforms.get("telegram") if isinstance(platforms, dict) else None
+    if not isinstance(telegram, dict):
+        raise SystemExit(0)
+    extra = telegram.get("extra")
+    if not isinstance(extra, dict):
+        raise SystemExit(0)
+    stale = {"dm_topics", "disable_topic_auto_rename"}
+    remaining = {k: v for k, v in extra.items() if k not in stale}
+    if len(remaining) == len(extra):
+        raise SystemExit(0)
+    if remaining:
+        telegram["extra"] = remaining
+    else:
+        del telegram["extra"]
+        if not telegram:
+            del platforms["telegram"]
+    p.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+    print("pruned retired telegram topic settings")
+except Exception as e:
+    print("hermes-prune-stale-telegram-topics: skipped: " + type(e).__name__, file=sys.stderr)
+' "$hermes_cfg" || echo "hermes-prune-stale-telegram-topics: warning, continuing" >&2 || true
+      fi
+    '';
 
 
   # Inject allowlist into the systemd environment so hermes's os.getenv()
