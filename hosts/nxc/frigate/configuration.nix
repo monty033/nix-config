@@ -155,19 +155,31 @@
       temporary="$snapshot.tmp"
       consecutive_failures=0
 
+      # HTTP 200 is not a picture. A kiosk whose camera is unavailable answers
+      # this request with its own HTML error page under a 200 status, so a
+      # status-only check wrote a web page into the snapshot feed and starved
+      # Frigate's decoder for ten hours without one warning. Require the JPEG
+      # start-of-image marker before a good snapshot is replaced.
+      is_jpeg() {
+        [ "$(head -c 3 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "ffd8ff" ]
+      }
+
       while :; do
         if ${pkgs.curl}/bin/curl \
           --fail --silent --show-error \
           --connect-timeout 3 --max-time 5 \
           "http://192.168.86.228:2323/?cmd=getCamshot&password=$FRIGATE_KIOSK_PASSWORD" \
           --output "$temporary" \
-          && test -s "$temporary" \
+          && is_jpeg "$temporary" \
           && mv -f -- "$temporary" "$snapshot"; then
           if [ "$consecutive_failures" -gt 0 ]; then
             echo "Kitchen kiosk snapshot fetch recovered" >&2
           fi
           consecutive_failures=0
         else
+          if [ -s "$temporary" ] && ! is_jpeg "$temporary" && [ "$consecutive_failures" -eq 0 ]; then
+            echo "Kitchen kiosk snapshot response is not a JPEG; keeping the last good frame" >&2
+          fi
           rm -f -- "$temporary"
           consecutive_failures=$((consecutive_failures + 1))
           echo "Kitchen kiosk snapshot fetch failed ($consecutive_failures consecutive failures)" >&2
