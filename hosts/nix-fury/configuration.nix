@@ -92,13 +92,37 @@
   # sealed envelopes here and the phone subscribes to them. Neither end sends
   # credentials, so ntfy's token auth would mean changing both clients; what
   # keeps a message confidential is the envelope (P-256 ECDH + AES-GCM, signed,
-  # topic bound) plus an unguessable 128-bit topic, not the server. The server
-  # does enforce the budgets below, so it is rate limited rather than open-ended.
+  # topic bound) plus an unguessable 128-bit topic, not the server.
+  #
+  # `behind-proxy` stays on so the per-visitor limits below key on the client
+  # address rather than on bifrost's. Caddy replaces X-Forwarded-For with the
+  # socket address for untrusted clients - checked against Caddy 2.11.7, the
+  # version bifrost runs, with the same no-trusted-proxies shape this vhost uses:
+  # a forged and a chained header both reached the upstream as the socket address
+  # - so the value ntfy reads is the real client, not something the client wrote.
+  # ntfy also keys on the last entry, so an appended chain cannot steer it.
+  # Turning the option off would collapse every internet client into bifrost's
+  # single bucket, where one anonymous client could drain the daily allowance and
+  # silence the phone - a worse hole than the tailnet one it would close. This
+  # assumes bifrost is the edge: a proxy (Cloudflare orange cloud, a layer-4 hop)
+  # in front of it that hides client addresses would make everyone share a bucket.
+  #
+  # The header is only trustworthy for proxied traffic. A tailnet peer can reach
+  # this port directly and write its own header, so for those peers the limits are
+  # advisory: it can claim a fresh allowance per request, or name the phone's or
+  # gateway's address and drain that specific bucket and keep it drained, stopping
+  # push for as long as it keeps sending. That is accepted rather than fixed here,
+  # because narrowing the port to bifrost means pinning its address in a firewall
+  # rule by hand - another address to keep right across a re-registration. What
+  # the peer gains is a way around the limits, including the targeted drain above;
+  # it gains no access the internet lacks, since this vhost is anonymous
+  # read-write for everyone too.
   services.ntfy-sh = {
     enable = true;
     settings = {
       base-url = "https://ntfy.montycasa.com";
-      # Reached by the bifrost proxy over the tailnet; the public side is Caddy.
+      # Proxied here by bifrost over the tailnet; any tailnet peer reaches this
+      # port directly too (see the firewall note). The public side is Caddy.
       listen-http = "0.0.0.0:2586";
       behind-proxy = true;
       cache-duration = "12h";
@@ -180,21 +204,19 @@
 
   networking.firewall.allowedTCPPorts = [ 8080 3001 5216 ];
 
-  # The proxy host is the only source allowed to reach the push listener; 2586 is
-  # deliberately absent from allowedTCPPorts, which would open it to the whole
-  # LAN and tailnet. `behind-proxy` makes the rate limits key on the forwarded
-  # client address, so any other peer able to reach the port could mint its own
-  # allowance. 100.106.205.39 is bifrost's tailscale0 address (it resolves this
-  # host to its tailnet address and proxies from tailscale0); if that node is
-  # ever re-registered, this rule needs the new address or the vhost returns 502.
-  # The iptables backend ignores networking.firewall.extraInputRules, which is
-  # nftables-only, so this goes through extraCommands.
-  networking.firewall.extraCommands = ''
-    iptables -w -A nixos-fw -p tcp -s 100.106.205.39 --dport 2586 -j nixos-fw-accept
-  '';
-  networking.firewall.extraStopCommands = ''
-    iptables -w -D nixos-fw -p tcp -s 100.106.205.39 --dport 2586 -j nixos-fw-accept 2>/dev/null || true
-  '';
+  # 2586 is deliberately absent from allowedTCPPorts and the LAN is dropped (a
+  # probe from another LAN host gets nothing), but tailnet peers do reach it:
+  # Tailscale's `ts-input` chain is jumped from INPUT ahead of nixos-fw and
+  # accepts everything arriving on tailscale0, so a rule placed in nixos-fw for
+  # this port filters nothing. Narrowing it to bifrost is possible - a rule in the
+  # raw table, which carries no tailscale rules today, runs before the filter
+  # table - but it would pin bifrost's address by hand, so this change does not do
+  # it; the exposure is accepted and the rate limits keep keying on the proxied
+  # client address (see the ntfy comment). mollysocket on 8020 rides the same
+  # ts-input accept - its vhost proxies to nix-fury:8020, which is not in the list
+  # above - so if tailscaled ever stops accepting tailscale0, both vhosts return
+  # 502 together; that is a diagnostic to remember, not a reason against narrowing
+  # 2586. Outside the tailnet the only path is bifrost's public vhost.
 
   system.stateVersion = "24.05";
 }
