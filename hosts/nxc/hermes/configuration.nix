@@ -186,6 +186,19 @@ let
     hash = "sha256-Ax//zlao53+YOwP/+v3AOYIH0R30U9ON7ixI3EjEEVI=";
     name = "hermes-session-reset-policy";
   };
+  # End-to-end encrypted push to Kyllene through ntfy. The phone supplies the
+  # server URL and topic when it registers over the dashboard connection, so no
+  # endpoint is configured here; pinned to the revision Kyllene v0.15.0 expects
+  # (PLUGIN_REF) because app and plugin share a wire format. Declared rather than
+  # installed from the app: on this managed install an app-driven install writes
+  # an unmanaged copy and its enable leg persists nothing.
+  heraldPushHermesPlugin = pkgs.fetchFromGitHub {
+    owner = "Giton22";
+    repo = "hermes-herald-push";
+    rev = "47297c5e2e2779e6895736e46f6e79ad91050e1d";
+    hash = "sha256-YCqQcdtcX3WuxZviu9/xDBKxASpPYuomalTw7xaYSjw=";
+    name = "hermes-herald-push";
+  };
   mnemosyneHermesPlugin = pkgs.runCommand "mnemosyne-hermes-plugin" { } ''
     mkdir -p $out
     cp -r ${mnemosyneHermes}/lib/python3.12/site-packages/mnemosyne_hermes/* $out/
@@ -692,6 +705,9 @@ in
       mnemosyneHermesPlugin
       homeAssistantHermesPlugin
       sessionResetPolicyHermesPlugin
+      # Push to the phone through ntfy, end-to-end encrypted. Phone tools are
+      # hidden until a phone switches them on in Kyllene.
+      heraldPushHermesPlugin
       # Claude Pro/Max via the official Claude Code CLI. The default
       # conversation route runs on the reseller gateway, so this plugin supplies
       # the delegation route (Haiku), the subscription fallback route, and the
@@ -986,6 +1002,7 @@ in
         "homeassistant"
         "hermes-session-reset-policy"
         "hermes-proton"
+        "herald-push"
       ];
       # hermes-proton registers two toolsets: `proton_mail` (read) and
       # `proton_mail_write` (send, delete, upload, share, invite). Both are
