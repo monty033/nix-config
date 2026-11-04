@@ -1198,36 +1198,6 @@ in
       };
 
       platforms = {
-        # Native Telegram DM-topic routing. Each topic starts with one compact
-        # umbrella skill; the umbrella loads specialist skills only when needed.
-        # disable_topic_auto_rename stops Hermes from rewriting the Telegram
-        # topic title on /new and similar session resets.
-        telegram = {
-          extra = {
-            disable_topic_auto_rename = true;
-            # Hermes 0.18.0 does not perform name-based topic discovery; if
-            # thread_id is absent it calls createForumTopic on startup, which
-            # created 7 duplicates (97639-97651) on the post-rebuild restart
-            # and orphaned the originals. Pinning the originals here so
-            # future restarts bind idempotently.
-            dm_topics = [
-              {
-                chat_id = 748642877;
-                topics = [
-                  { name = "Hermes";           skill = "topic-hermes";          thread_id = 87624; }
-                  { name = "Health & Fitness"; skill = "topic-health-fitness";  thread_id = 92608; }
-                  { name = "Homelab";          skill = "topic-homelab";         thread_id = 87193; }
-                  { name = "Tasks";            skill = "topic-pm";              thread_id = 87814; }
-                  { name = "Briefing";         skill = "topic-briefing";        thread_id = 90466; }
-                  { name = "General";          skill = "topic-general";         thread_id = 87664; }
-                  { name = "CHOP";             skill = "topic-chop";            thread_id = 88598; }
-                  { name = "Coder";            skill = "topic-coder";           thread_id = 116234; }
-                ];
-              }
-            ];
-          };
-        };
-
         # Voice Assistant endpoint. Keep the latency-sensitive route on Luna
         # without changing the configured default route for other clients.
         api_server = {
