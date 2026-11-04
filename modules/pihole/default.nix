@@ -782,5 +782,27 @@ in
       hostName = cfg.webHostName;
       ports = [ "${cfg.webListenAddress}:${toString cfg.webPort}" ];
     };
+
+    # FTL appends every query to pihole.log, and nothing rotates it on NixOS:
+    # the upstream installer's /etc/pihole/logrotate hook has no equivalent
+    # here, and FTL only rotates its own FTL.log. Left unrotated the file grew
+    # to 21 GB. Where a container's rootfs is on non-snapshot storage, vzdump
+    # falls back to suspend mode and re-copies the whole log while the guest is
+    # frozen, which keeps the resolver down for the length of that sync.
+    # Rotate daily and keep a week so that delta stays small.
+    #
+    # copytruncate keeps the inode and FTL's open append handle valid, so no
+    # reopen or restart is needed; the cost is that queries logged during the
+    # copy window are dropped, which is acceptable for a diagnostic log.
+    services.logrotate.settings.pihole-query-log = {
+      files = "${cfg.logDirectory}/pihole.log";
+      frequency = "daily";
+      rotate = 7;
+      compress = true;
+      delaycompress = true;
+      copytruncate = true;
+      missingok = true;
+      notifempty = true;
+    };
   };
 }
