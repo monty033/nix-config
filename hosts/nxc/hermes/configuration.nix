@@ -1030,6 +1030,13 @@ in
       agent = {
         max_turns = 90;
         gateway_timeout = 1800;
+        # Short reply-style reminder. Hermes appends agent.system_prompt to the
+        # end of the cached system prompt (SOUL.md, skills index) on every API
+        # call for gateway, desktop/TUI and CLI sessions, so it sits after the
+        # long instruction block rather than before it. An active
+        # display.personality replaces it. Keep it in step with the "How I
+        # talk" section of SOUL.md.
+        system_prompt = "Style check before every reply to Patrick: lead with the answer in plain words. No commands, code blocks, file paths, version strings, hashes or exit codes unless he asked for them; offer \"want the details?\" instead. Keep it short. End with what he needs to do, or ask your question.";
         # Explicitly empty, not omitted. The activation script deep-merges these
         # settings over the config.yaml on disk: Nix wins on values, but a key
         # Nix stops declaring is never *deleted* from the file. Omitting this
