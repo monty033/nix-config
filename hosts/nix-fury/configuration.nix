@@ -88,6 +88,32 @@
     };
   };
 
+  # Push endpoint for the Hermes phone client (Kyllene). The gateway publishes
+  # sealed envelopes here and the phone subscribes to them. Neither end sends
+  # credentials, so ntfy's token auth would mean changing both clients; what
+  # keeps a message confidential is the envelope (P-256 ECDH + AES-GCM, signed,
+  # topic bound) plus an unguessable 128-bit topic, not the server. The server
+  # does enforce the budgets below, so it is rate limited rather than open-ended.
+  services.ntfy-sh = {
+    enable = true;
+    settings = {
+      base-url = "https://ntfy.montycasa.com";
+      # Reached by the bifrost proxy over the tailnet; the public side is Caddy.
+      listen-http = "0.0.0.0:2586";
+      behind-proxy = true;
+      cache-duration = "12h";
+      auth-default-access = "read-write";
+      # No attachments: an oversized body is rejected instead of stored. The
+      # publisher caps its sealed envelope at ntfy's 4096-byte message limit.
+      attachment-cache-dir = "";
+      # No browser UI: the only consumers are the gateway and the phone.
+      web-root = "disable";
+      visitor-request-limit-burst = 60;
+      visitor-request-limit-replenish = "10s";
+      visitor-message-daily-limit = 2000;
+    };
+  };
+
   services.mollysocket = {
     enable = true;
     settings = {
@@ -153,6 +179,22 @@
   };
 
   networking.firewall.allowedTCPPorts = [ 8080 3001 5216 ];
+
+  # The proxy host is the only source allowed to reach the push listener; 2586 is
+  # deliberately absent from allowedTCPPorts, which would open it to the whole
+  # LAN and tailnet. `behind-proxy` makes the rate limits key on the forwarded
+  # client address, so any other peer able to reach the port could mint its own
+  # allowance. 100.106.205.39 is bifrost's tailscale0 address (it resolves this
+  # host to its tailnet address and proxies from tailscale0); if that node is
+  # ever re-registered, this rule needs the new address or the vhost returns 502.
+  # The iptables backend ignores networking.firewall.extraInputRules, which is
+  # nftables-only, so this goes through extraCommands.
+  networking.firewall.extraCommands = ''
+    iptables -w -A nixos-fw -p tcp -s 100.106.205.39 --dport 2586 -j nixos-fw-accept
+  '';
+  networking.firewall.extraStopCommands = ''
+    iptables -w -D nixos-fw -p tcp -s 100.106.205.39 --dport 2586 -j nixos-fw-accept 2>/dev/null || true
+  '';
 
   system.stateVersion = "24.05";
 }
