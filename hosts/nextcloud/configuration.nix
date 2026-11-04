@@ -69,8 +69,9 @@
     enable = true;
     hostName = "drive.montycasa.com";
     datadir = "/mnt/drive";
-    # Need to manually increment with every major upgrade.
-    package = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.nextcloud34;
+    # Need to manually increment with every major upgrade. Disable third-party
+    # apps and back up the database first: downgrades are not supported.
+    package = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.nextcloud35;
     # Let NixOS install and configure the database automatically.
     database.createLocally = true;
     # Let NixOS install and configure Redis caching automatically.
