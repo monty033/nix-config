@@ -139,6 +139,15 @@
         upstream = "http://nix-fury:8020";
       };
 
+      # Push endpoint for the Hermes phone client. Every message is sealed and
+      # signed by the client that sends it and stored as an opaque body, so no
+      # auth sits in front of this vhost: a login page here would fail both ends
+      # with a 401 that only shows up as "no notifications".
+      "ntfy.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://nix-fury:2586";
+      };
+
       "ln.montybitcoin.com" = {
         protocol = "http";
         upstream = "http://bitcoin:8080";
