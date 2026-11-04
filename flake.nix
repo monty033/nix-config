@@ -33,7 +33,25 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 05a9ac6a. `notes.sync` may flush the durable
+    # Pinned to NookBridge main at 279533b. Note bodies are editable again:
+    # `notes.update` carrying `content` was refused for every app-authored note
+    # because the write path decoded the stored HTML strictly before looking at
+    # the incoming Markdown, and markup the model does not represent (styles,
+    # ids, entities, unmodelled elements) failed that grammar. Unrepresentable
+    # blocks are now preserved byte-for-byte instead of refused, what counts as
+    # preservable is decided rather than assumed (presentational properties
+    # only, no resource-loading or executing CSS functions, no `var()`), and an
+    # unchanged `notes.get` body echoed back to `notes.update` advances the
+    # revision and writes the stored document untouched (#283). Appended list
+    # fragments stay lists and the read projection no longer escapes plain
+    # parentheses.
+    #
+    # This pin also carries #282, which serializes note reads against writes:
+    # an append advances `dateEdited` and then replaces the content row, and a
+    # reader could previously pair the new revision with the old body. Readers
+    # now share the database mutex and take one snapshot.
+    #
+    # Previous pin 05a9ac6: `notes.sync` may flush the durable
     # queue when the install sets the optional `upload` key, so a note edited in
     # the Notesnook app no longer waits for a root operator run; the default
     # stays `attributed`, which keeps the strict marker gate (#281).
@@ -115,7 +133,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=05a9ac6a6e92f397d4b06b835c9a206ccc4e4dc2";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=279533bb5815135065e38b513bd6fd2b8dc9498e";
       flake = false;
     };
 
