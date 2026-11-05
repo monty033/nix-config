@@ -33,7 +33,33 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 279533b. Note bodies are editable again:
+    # Pinned to NookBridge main at 4822344. Ordinary note prose survives a
+    # read: both Markdown serializers escaped `_` and `\` unconditionally, so
+    # `invalid_request` read back as `invalid\_request` and `C:\temp` as
+    # `C:\\temp`, and echoing a body unchanged wrote the corruption into the
+    # note. An underscore with a word character either side cannot open or
+    # close emphasis, and a backslash is an escape only before a character the
+    # format escapes; those two cases are now left alone, and the parser
+    # accepts them so the serializer still verifies its own output. Genuine
+    # syntax (`_emphasis_`, backslashes before punctuation, brackets,
+    # backticks) still escapes. `maxContentBytes` rises from 4,096 to 27,000,
+    # lifting the ceiling that made ordinary notes unrewritable. Which limit a
+    # caller meets first depends on the note's shape: a note containing a
+    # single inline text above 8,192 bytes, or a body above 27,000 bytes, can
+    # still be read but not written; above the 65,536-byte response budget a
+    # note is not returned at all. The worst-case frame arithmetic is recorded
+    # beside the constant and tested for create, append and update (#289).
+    #
+    # Earlier pin 25c7f74: the production recovery bundle no longer requires
+    # `notesnook-logs.db`. This runtime never initialises Notesnook core
+    # logging, so that file is never created and the old three-member contract
+    # made `bundle inspect` report `partial` and refused every reinitialize and
+    # rollback on a real deployment. The two data databases remain required;
+    # the log database is planned, quarantined, and restored only when present,
+    # and a corrupt optional member is quarantined instead of blocking recovery
+    # (#287).
+    #
+    # Earlier pin 279533b. Note bodies are editable again:
     # `notes.update` carrying `content` was refused for every app-authored note
     # because the write path decoded the stored HTML strictly before looking at
     # the incoming Markdown, and markup the model does not represent (styles,
@@ -46,10 +72,10 @@
     # fragments stay lists and the read projection no longer escapes plain
     # parentheses.
     #
-    # This pin also carries #282, which serializes note reads against writes:
-    # an append advances `dateEdited` and then replaces the content row, and a
-    # reader could previously pair the new revision with the old body. Readers
-    # now share the database mutex and take one snapshot.
+    # That same revision also carries #282, which serializes note reads
+    # against writes: an append advances `dateEdited` and then replaces the
+    # content row, and a reader could previously pair the new revision with the
+    # old body. Readers now share the database mutex and take one snapshot.
     #
     # Previous pin 05a9ac6: `notes.sync` may flush the durable
     # queue when the install sets the optional `upload` key, so a note edited in
@@ -133,15 +159,8 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     #
-    # This pin adds #287: the production recovery bundle no longer requires
-    # `notesnook-logs.db`. This runtime never initialises Notesnook core
-    # logging, so that file is never created and the old three-member contract
-    # made `bundle inspect` report `partial` and refused every reinitialize and
-    # rollback on a real deployment. The two data databases remain required;
-    # the log database is planned, quarantined, and restored only when present,
-    # and a corrupt optional member is quarantined instead of blocking recovery.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=25c7f7415754aff706521ab0c66bafd9e1cb3002";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=482234445cde0876e843f9b4c8f0efc6f07d1919";
       flake = false;
     };
 
