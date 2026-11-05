@@ -23,6 +23,17 @@ let
     inherit inputs;
   };
 
+  # Production recovery contract: these two data databases are REQUIRED.  The
+  # upstream log database is OPTIONAL, so the fixture (and therefore its
+  # quarantine entry) holds all three, while reinitialize recreates only the
+  # required pair.
+  requiredMembers = [
+    "nookbridge-storage.db"
+    "notesnook.db"
+  ];
+  optionalMembers = [ "notesnook-logs.db" ];
+  members = requiredMembers ++ optionalMembers;
+
   # Use the shipped storage wrapper so the fixture has real SQLCipher pages;
   # plain SQLite files would make a corruption/recovery check meaningless.
   fixtureBuilder = pkgs.writeText "nookbridge-recovery-fixture.mjs" ''
@@ -37,11 +48,12 @@ let
     const canary = readFileSync(canaryPath, "utf8").trim();
     mkdirSync(stateDir, { recursive: true, mode: 0o750 });
 
-    for (const member of [
-      "nookbridge-storage.db",
-      "notesnook.db",
-      "notesnook-logs.db",
-    ]) {
+    const requiredMembers = ${builtins.toJSON requiredMembers};
+    const optionalMembers = ${builtins.toJSON optionalMembers};
+
+    // The pre-recovery fixture deliberately contains every member, including
+    // the optional one, so quarantine and rollback preservation stay covered.
+    for (const member of [...requiredMembers, ...optionalMembers]) {
       const storage = new SqliteStorage({
         dbPath: join(stateDir, member),
         key,
@@ -68,21 +80,25 @@ let
     const lockPath = join(stateDir, "nookbridge.lock");
     const credentialPath = join(process.env.CREDENTIALS_DIRECTORY, "nookbridge-db-key");
     const key = readFileSync(credentialPath, "utf8").trim();
-    const members = [
-      "nookbridge-storage.db",
-      "notesnook.db",
-      "notesnook-logs.db",
-    ];
+    const requiredMembers = ${builtins.toJSON requiredMembers};
+    const optionalMembers = ${builtins.toJSON optionalMembers};
 
-    for (const member of members) {
+    // The production bundle requires the two data databases.  The optional
+    // Notesnook log database is normally absent after reinitialize, so a
+    // missing (or damaged) optional member must not fail startup.
+    for (const member of [...requiredMembers, ...optionalMembers]) {
+      const required = requiredMembers.includes(member);
       const dbPath = join(stateDir, member);
-      if (!existsSync(dbPath)) process.exit(71);
+      if (!existsSync(dbPath)) {
+        if (required) process.exit(71);
+        continue;
+      }
       let storage;
       try {
         storage = new SqliteStorage({ dbPath, key, withExtensions: false });
         storage.get("SELECT count(*) AS count FROM sqlite_master");
       } catch {
-        process.exit(72);
+        if (required) process.exit(72);
       } finally {
         try { storage?.close(); } catch { /* categorical startup failure */ }
       }
@@ -156,7 +172,7 @@ let
     chmod 0400 "$credentials/nookbridge-db-key"
     chmod 0600 "$root/canary"
     ${pkgs.nodejs_22}/bin/node ${fixtureBuilder} "$state" "$credentials" "$root/canary"
-    for member in nookbridge-storage.db notesnook.db notesnook-logs.db; do
+    for member in ${builtins.concatStringsSep " " members}; do
       cp -- "$state/$member" "$clean/$member"
       chown nookbridge:nookbridge "$state/$member"
       chmod 0600 "$state/$member"
@@ -271,11 +287,12 @@ in
       STATE = ${builtins.toJSON fixtureState}
       CREDENTIALS = ${builtins.toJSON (builtins.dirOf fixtureKeyPath)}
       CANARY_PATH = ${builtins.toJSON fixtureCanary}
-      MEMBERS = [
-          "nookbridge-storage.db",
-          "notesnook.db",
-          "notesnook-logs.db",
-      ]
+      REQUIRED = ${builtins.toJSON requiredMembers}
+      OPTIONAL = ${builtins.toJSON optionalMembers}
+      # The fixture and its quarantine hold every member; reinitialize recreates
+      # only REQUIRED, so pre-recovery helpers use MEMBERS and post-reinitialize
+      # checks use REQUIRED.
+      MEMBERS = REQUIRED + OPTIONAL
 
       def recover(arguments):
           command = (
@@ -287,16 +304,28 @@ in
           )
           return machine.execute(command)
 
-      def hashes_for(root):
+      def hashes_for(root, names=None):
+          names = MEMBERS if names is None else names
           return machine.succeed(
               "sha256sum " + " ".join(
-                  shlex.quote(root + "/" + member) for member in MEMBERS
+                  shlex.quote(root + "/" + member) for member in names
               )
               + " | cut -d' ' -f1"
           ).strip()
 
       def member_hashes():
           return hashes_for(STATE)
+
+      def required_hashes():
+          return hashes_for(STATE, REQUIRED)
+
+      def root_entries(root=STATE):
+          return sorted(
+              machine.succeed(
+                  "find " + shlex.quote(root)
+                  + " -mindepth 1 -maxdepth 1 -printf '%f\\n'"
+              ).strip().splitlines()
+          )
 
       def tree_snapshot():
           # Size alone cannot distinguish a move from a delete-and-recreate;
@@ -406,7 +435,7 @@ in
       # healthy generated fixture. Restore only after all corruption evidence
       # has been captured; this keeps the workflow in one throwaway state root.
       machine.succeed(
-          "for member in nookbridge-storage.db notesnook.db notesnook-logs.db; do "
+          "for member in ${builtins.concatStringsSep " " members}; do "
           + "cp -- " + shlex.quote("/run/nookbridge-recovery/clean/")
           + "$member " + shlex.quote(STATE + "/") + "$member; "
           + "chown nookbridge:nookbridge " + shlex.quote(STATE + "/") + "$member; "
@@ -429,8 +458,9 @@ in
               assert "requires" in output, output
               assert member_hashes() == before, arguments
 
-      with subtest("both approvals quarantine originals and create fresh state"):
+      with subtest("both approvals quarantine originals and create fresh required state"):
           original_hashes = member_hashes()
+          original_required_hashes = required_hashes()
           rc, output = recover(
               "reinitialize --approve-reinitialize --accept-unsynced-loss"
           )
@@ -446,18 +476,30 @@ in
           assert machine.succeed(
               "stat -c '%a' " + shlex.quote(quarantine)
           ).strip() == "700"
+          # The quarantine still holds every pre-recovery member, including the
+          # optional one, with the original bytes.
           preserved = hashes_for(quarantine)
           assert preserved == original_hashes
+          # Reinitialize recreates REQUIRED members only.  The optional log
+          # member is quarantined, not recreated, so it must not exist after.
           machine.succeed(
               "test -f " + " && test -f ".join(
-                  shlex.quote(STATE + "/" + member) for member in MEMBERS
+                  shlex.quote(STATE + "/" + member) for member in REQUIRED
               )
           )
+          for member in OPTIONAL:
+              machine.fail("test -e " + shlex.quote(STATE + "/" + member))
+          # Nothing else may appear beside the fresh required members and the
+          # quarantine directory.
+          assert root_entries() == sorted([".recovery-quarantine"] + REQUIRED), root_entries()
           # The originals must actually have moved: fresh bytes differ from the
           # quarantined bytes, and nothing is hardlinked back into place.
-          fresh_hashes = member_hashes()
-          assert fresh_hashes != original_hashes, (fresh_hashes, original_hashes)
-          for member in MEMBERS:
+          fresh_hashes = required_hashes()
+          assert fresh_hashes != original_required_hashes, (
+              fresh_hashes,
+              original_required_hashes,
+          )
+          for member in REQUIRED:
               member_path = shlex.quote(STATE + "/" + member)
               # Different bytes alone would also be satisfied by re-encrypting
               # the same rows under a new salt, and `stat %h` is 1 for a symlink
@@ -466,12 +508,12 @@ in
               assert machine.execute("test ! -L " + member_path)[0] == 0, member
               size = machine.succeed("stat -c '%s' " + member_path).strip()
               assert size == "0", (member, size)
-          for member in MEMBERS:
+          for member in REQUIRED:
               links = machine.succeed(
                   "stat -c '%h' " + shlex.quote(STATE + "/" + member)
               ).strip()
               assert links == "1", (member, links)
-          for member in MEMBERS:
+          for member in REQUIRED:
               machine.succeed(
                   "chown nookbridge:nookbridge " + shlex.quote(STATE + "/" + member)
                   + " && chmod 0600 " + shlex.quote(STATE + "/" + member)
@@ -508,9 +550,12 @@ in
       with subtest("rollback restores the quarantined bytes onto cleared state"):
           quarantine = STATE + "/.recovery-quarantine/" + quarantine_id
           preserved_hashes = hashes_for(quarantine)
+          # Only the fresh REQUIRED members exist after reinitialize.  The
+          # optional member is absent and must stay absent until rollback
+          # restores it from the quarantine.
           machine.succeed(
               "install -d -m 0700 -o root -g root /run/nookbridge-recovery/fresh-aside && "
-              + "for member in nookbridge-storage.db notesnook.db notesnook-logs.db; do "
+              + "for member in ${builtins.concatStringsSep " " requiredMembers}; do "
               + "mv -- " + shlex.quote(STATE + "/") + "$member "
               + shlex.quote("/run/nookbridge-recovery/fresh-aside/") + "$member; done"
           )

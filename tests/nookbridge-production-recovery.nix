@@ -65,11 +65,15 @@ let
 
   stateDir = "/var/lib/nookbridge";
   socketPath = "/run/nookbridge/nookbridge.sock";
-  members = [
+  # Production recovery contract: the two data databases are REQUIRED and the
+  # upstream log database is OPTIONAL.  The pre-recovery fixture deliberately
+  # materialises all three; reinitialize recreates only the required pair.
+  requiredMembers = [
     "nookbridge-storage.db"
     "notesnook.db"
-    "notesnook-logs.db"
   ];
+  optionalMembers = [ "notesnook-logs.db" ];
+  members = requiredMembers ++ optionalMembers;
 in
 {
   name = "nookbridge-production-recovery";
@@ -147,9 +151,12 @@ in
 
   testScript = { ... }:
     let
+      requiredJson = builtins.toJSON requiredMembers;
+      optionalJson = builtins.toJSON optionalMembers;
       membersJson = builtins.toJSON members;
       stateJson = builtins.toJSON stateDir;
       socketJson = builtins.toJSON socketPath;
+      nookctlJson = builtins.toJSON "${nookbridge}/bin/nookctl";
     in
     ''
       import json
@@ -158,7 +165,12 @@ in
 
       STATE = ${stateJson}
       SOCKET = ${socketJson}
+      REQUIRED = ${requiredJson}
+      OPTIONAL = ${optionalJson}
       MEMBERS = ${membersJson}
+      NOOKCTL = ${nookctlJson}
+      CLEAN = "/run/nookbridge-g2-clean"
+      SHAPE = "/run/nookbridge-g2-shape"
       SECRET_SOURCE = "/run/secrets/nookbridge-db-key"
       AGE_KEY = "/run/nookbridge-sops/age-key.txt"
       RECOVERY = "/run/current-system/sw/bin/nookbridge-recovery"
@@ -450,20 +462,91 @@ in
           finally:
               machine.succeed("rm -f -- " + shlex.quote(CLI_OUTPUT))
 
+      def run_offline_recovery(state_root, arguments):
+          # Reinitialize the product directly for one isolated shape probe.  The
+          # module wrapper always restarts nookd after a successful
+          # reinitialize, and nookd immediately writes its freshly opened
+          # databases; keeping the daemon out makes the exact on-disk
+          # post-reinitialize shape observable.
+          machine.succeed(
+              "install -d -m 0700 -o root -g root " + shlex.quote(SECRET_SCAN_DIR)
+              + " && rm -f -- " + shlex.quote(CLI_OUTPUT)
+          )
+          root = shlex.quote(state_root)
+          # Mirror the module wrapper's service identity, credential boundary,
+          # namespace hardening, UMask, and state ownership, but do not arrange
+          # for nookd to be started after the command returns.
+          command = (
+              "systemd-run --quiet --wait --collect --pipe "
+              "--unit=nookbridge-g2-shape-reinitialize.service "
+              "--uid=nookbridge --gid=nookbridge "
+              "--property=WorkingDirectory=" + root + " "
+              "--property=Environment=HOME=" + root + " "
+              "--setenv=NOOKBRIDGE_STATE_DIR=" + root + " "
+              "--property=LoadCredential=nookbridge-db-key:"
+              + shlex.quote(SECRET_SOURCE) + " "
+              "--property=ProtectSystem=strict "
+              "--property=ProtectHome=yes "
+              "--property=PrivateTmp=yes "
+              "--property=PrivateDevices=yes "
+              "--property=NoNewPrivileges=yes "
+              "--property=RestrictAddressFamilies=AF_UNIX "
+              "--property=RestrictNamespaces=yes "
+              "--property=ProtectKernelTunables=yes "
+              "--property=ProtectKernelModules=yes "
+              "--property=ProtectControlGroups=yes "
+              "--property=LockPersonality=yes "
+              "--property=RestrictRealtime=yes "
+              "--property=RestrictSUIDSGID=yes "
+              "--property=CapabilityBoundingSet= "
+              "--property=AmbientCapabilities= "
+              "--property=SystemCallArchitectures=native "
+              "--property=ReadWritePaths=" + root + " "
+              "--property=UMask=0077 "
+              "--property=TimeoutStartSec=2min "
+              "--property=RuntimeMaxSec=2min "
+              + shlex.quote(NOOKCTL) + " recover-local-state bundle " + arguments
+          )
+          result = machine.execute(
+              "umask 077; " + command + " > " + shlex.quote(CLI_OUTPUT)
+              + " 2>&1; chmod 0600 " + shlex.quote(CLI_OUTPUT)
+          )
+          captured_rc, captured = machine.execute("cat -- " + shlex.quote(CLI_OUTPUT))
+          try:
+              assert captured_rc == 0, ("recovery output capture failed", captured_rc, captured)
+              output = result[1] + "\n" + captured
+              assert database_key not in output, "database key leaked into recovery output"
+              wait_until(
+                  "test -z \"$(systemctl list-units --all --type=service --no-legend 'nookbridge-g2-shape-reinitialize.service')\"",
+                  "shape recovery unit did not finish collecting",
+              )
+              return result[0], output
+          finally:
+              machine.succeed("rm -f -- " + shlex.quote(CLI_OUTPUT))
+
       def hashes(root, names=MEMBERS):
           paths = " ".join(shlex.quote(root + "/" + name) for name in names)
           return machine.succeed("sha256sum -- " + paths + " | awk '{print $1}'").strip()
 
-      def member_listing():
+      def member_listing(root=STATE):
           names = machine.succeed(
-              "find " + shlex.quote(STATE)
+              "find " + shlex.quote(root)
               + " -maxdepth 1 -type f -name '*.db' -printf '%f\\n' | sort"
           ).strip().splitlines()
           return sorted(names)
 
-      def require_members(nonempty=True):
-          assert member_listing() == sorted(MEMBERS), member_listing()
-          for member in MEMBERS:
+      def root_listing(root=STATE):
+          return sorted(
+              machine.succeed(
+                  "find " + shlex.quote(root)
+                  + " -mindepth 1 -maxdepth 1 -printf '%f\\n'"
+              ).strip().splitlines()
+          )
+
+      def require_members(nonempty=True, names=None):
+          names = MEMBERS if names is None else names
+          assert member_listing() == sorted(names), (member_listing(), names)
+          for member in names:
               path = shlex.quote(STATE + "/" + member)
               machine.succeed("test -f " + path)
               if nonempty:
@@ -475,18 +558,28 @@ in
               )
 
       def require_fresh_members():
-          assert member_listing() == sorted(MEMBERS), member_listing()
-          for member in MEMBERS:
+          # Reinitialize recreates the REQUIRED pair only.  The optional log
+          # member is quarantined when present and must not be recreated.
+          assert member_listing() == sorted(REQUIRED), member_listing()
+          for member in OPTIONAL:
+              machine.fail("test -e " + shlex.quote(STATE + "/" + member))
+          for member in REQUIRED:
               path = shlex.quote(STATE + "/" + member)
+              # `stat -c %F` reports a zero-byte file as "regular empty file",
+              # so prove regular-and-not-a-symlink with the test predicates.
+              assert machine.execute("test -f " + path)[0] == 0, member
+              assert machine.execute("test ! -L " + path)[0] == 0, member
+              assert machine.succeed(
+                  "stat -c '%h' " + path
+              ).strip() == "1", member
               ownership = machine.succeed(
                   "stat -c '%U %G %a' " + path
               ).strip()
               assert ownership == "nookbridge nookbridge 600", (member, ownership)
-              # The wrapper may have already restored nookd by the time the
-              # command returns, so a zero-length sample here would race the
-              # daemon's first open.  Freshness is proved by the changed
-              # hashes/inodes below; wait_started() and the post-start RPC then
-              # wait for and verify the product's materialization condition.
+              # The wrapper starts nookd after a successful reinitialize, so a
+              # zero-length sample here would race the daemon's first open.
+              # The isolated reinitialize probe below asserts the exact
+              # zero-byte/link-count shape before any daemon can touch it.
               machine.succeed("test -f " + path)
 
       def mcp(messages, user="hermes"):
@@ -590,8 +683,48 @@ in
               + " ".join(
                   shlex.quote(STATE + "/" + member) for member in MEMBERS
               )
-              + " /run/nookbridge-g2-clean/"
+              + " " + shlex.quote(CLEAN + "/")
           )
+
+      with subtest("reinitialize alone creates exactly the required fresh members"):
+          machine.succeed(
+              "rm -rf -- " + shlex.quote(SHAPE)
+              + " && install -d -m 0700 -o nookbridge -g nookbridge "
+              + shlex.quote(SHAPE)
+          )
+          machine.succeed(
+              "runuser -u nookbridge -- cp -- "
+              + " ".join(
+                  shlex.quote(CLEAN + "/" + member) for member in MEMBERS
+              )
+              + " " + shlex.quote(SHAPE + "/")
+          )
+          original_shape_hashes = hashes(SHAPE)
+          rc, output = run_offline_recovery(
+              SHAPE,
+              "reinitialize --approve-reinitialize --accept-unsynced-loss",
+          )
+          assert rc == 0, output
+          match = re.search(r"id=([A-Za-z0-9_-]+)", output)
+          assert match is not None, output
+          shape_quarantine = SHAPE + "/.recovery-quarantine/" + match.group(1)
+          assert hashes(shape_quarantine) == original_shape_hashes
+          # Exactly the two required members and the quarantine directory.
+          assert root_listing(SHAPE) == sorted(
+              [".recovery-quarantine"] + REQUIRED
+          ), root_listing(SHAPE)
+          for member in REQUIRED:
+              path = shlex.quote(SHAPE + "/" + member)
+              # A zero-byte regular file is `regular empty file` to stat %F.
+              assert machine.execute("test -f " + path)[0] == 0, member
+              assert machine.execute("test ! -L " + path)[0] == 0, member
+              info = machine.succeed(
+                  "stat -c '%s %h %U %G %a' " + path
+              ).strip()
+              assert info == "0 1 nookbridge nookbridge 600", (member, info)
+          for member in OPTIONAL:
+              machine.fail("test -e " + shlex.quote(SHAPE + "/" + member))
+          machine.succeed("rm -rf -- " + shlex.quote(SHAPE))
 
       with subtest("recovery wrapper restores a previously active daemon"):
           machine.succeed("systemctl start nookd.service")
@@ -708,6 +841,12 @@ in
                   shlex.quote(STATE + "/" + member) for member in MEMBERS
               )
           ).strip()
+          original_required_inodes = machine.succeed(
+              "stat -c '%i' " + " ".join(
+                  shlex.quote(STATE + "/" + member) for member in REQUIRED
+              )
+          ).strip()
+          corrupt_required_hashes = hashes(STATE, REQUIRED)
           rc, output = recover(
               "reinitialize --approve-reinitialize --accept-unsynced-loss"
           )
@@ -726,18 +865,22 @@ in
               )
           ).strip() == original_inodes
           require_fresh_members()
-          fresh_hashes = hashes(STATE)
-          assert fresh_hashes != corrupt_hashes
+          # The optional log member is not recreated.  The main wrapper path
+          # starts nookd immediately, so its exact zero-byte shape is proved by
+          # the isolated reinitialize probe above; here the required pair must
+          # still be new bytes and new inodes.
+          fresh_hashes = hashes(STATE, REQUIRED)
+          assert fresh_hashes != corrupt_required_hashes
           fresh_inodes = machine.succeed(
               "stat -c '%i' " + " ".join(
-                  shlex.quote(STATE + "/" + member) for member in MEMBERS
+                  shlex.quote(STATE + "/" + member) for member in REQUIRED
               )
           ).strip()
-          assert fresh_inodes != original_inodes
+          assert fresh_inodes != original_required_inodes
           # Fresh state is not merely a renamed copy: wait for the real
           # daemon's post-start lock/socket condition before checking files.
           wait_started()
-          require_members(nonempty=False)
+          require_members(nonempty=False, names=REQUIRED)
           rc, listing = notebook_listing()
           assert '\\"kind\\":\\"notebooks\\"' in listing, (rc, listing)
           assert '\\"notebooks\\":[]' in listing, listing
@@ -797,7 +940,7 @@ in
       with subtest("rollback refuses an occupied destination"):
           machine.succeed("systemctl stop nookd.service")
           wait_stopped()
-          occupied_hashes = hashes(STATE)
+          occupied_hashes = hashes(STATE, REQUIRED)
           rc, output = recover(
               "rollback --approve-rollback " + shlex.quote(quarantine_id)
           )
@@ -805,7 +948,7 @@ in
           assert output.strip().endswith(
               "nookctl recover-local-state: nookctl recover-local-state bundle rollback: destination is occupied"
           ), output
-          assert hashes(STATE) == occupied_hashes
+          assert hashes(STATE, REQUIRED) == occupied_hashes
           wait_stopped()
 
       with subtest("approved rollback restores the readable-corrupt originals"):
