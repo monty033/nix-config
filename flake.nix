@@ -132,8 +132,16 @@
     # call site, so the operator view/preimage projections still require a
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
+    #
+    # This pin adds #287: the production recovery bundle no longer requires
+    # `notesnook-logs.db`. This runtime never initialises Notesnook core
+    # logging, so that file is never created and the old three-member contract
+    # made `bundle inspect` report `partial` and refused every reinitialize and
+    # rollback on a real deployment. The two data databases remain required;
+    # the log database is planned, quarantined, and restored only when present,
+    # and a corrupt optional member is quarantined instead of blocking recovery.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=279533bb5815135065e38b513bd6fd2b8dc9498e";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=25c7f7415754aff706521ab0c66bafd9e1cb3002";
       flake = false;
     };
 
