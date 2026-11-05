@@ -33,8 +33,24 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 4822344. Ordinary note prose survives a
-    # read: both Markdown serializers escaped `_` and `\` unconditionally, so
+    # Pinned to NookBridge main at de7922e. A content edit no longer changes a
+    # note's list kind. `notes.update` with a `content` patch and no
+    # `listKind` substituted the default `simple-checklist`, so every
+    # `task-list` became a plain checklist on its next edit, and echoing back
+    # the body `notes.get` had just returned escaped the `:::nookbridge list`
+    # fence into prose and emitted a second wrapper inside it, nesting a
+    # checklist in a checklist on every save. The effective kind now comes from
+    # the note's stored document, each wrapper keeps its own block kind, a
+    # directive-free block falls back to the stored kind only when the note has
+    # exactly one, and a directive-free body on a mixed-kind note is refused
+    # before any mutator instead of guessed. An explicit `listKind` overrides
+    # on both the versioned and legacy content paths. Header-stripped canonical
+    # bodies go through the strict document parser: an exact echo is preserved
+    # byte for byte, and a trimmed or noncanonical body is refused rather than
+    # silently re-encoded (#290).
+    #
+    # Earlier pin 4822344. Ordinary note prose survives a read: both Markdown
+    # serializers escaped `_` and `\` unconditionally, so
     # `invalid_request` read back as `invalid\_request` and `C:\temp` as
     # `C:\\temp`, and echoing a body unchanged wrote the corruption into the
     # note. An underscore with a word character either side cannot open or
@@ -160,7 +176,7 @@
     # accounting are unchanged from the previous pin.
     #
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=482234445cde0876e843f9b4c8f0efc6f07d1919";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=de7922e1d2e198f071c735b4bec49061bca11f1d";
       flake = false;
     };
 
