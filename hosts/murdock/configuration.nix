@@ -426,6 +426,35 @@ in
     browsing = true;
   };
 
+  # Canon imageCLASS MF650C Series (192.168.86.202). The printer advertises
+  # AirPrint 2.1 / IPP Everywhere, so the queue is expressed driverless
+  # (`model = everywhere`) and no vendor UFR II driver is installed.
+  hardware.printers = {
+    ensurePrinters = [
+      {
+        name = "Canon_MF650C";
+        location = "Home";
+        description = "Canon imageCLASS MF650C Series";
+        deviceUri = "ipp://192.168.86.202/ipp/print";
+        model = "everywhere";
+      }
+    ];
+    ensureDefaultPrinter = "Canon_MF650C";
+  };
+
+  # Queue creation queries the printer over IPP. Murdock reaches the printer
+  # directly on the home LAN but through an accepted tailnet subnet route
+  # elsewhere, and that route is only installed once the autoconnect unit has
+  # brought the node up, so order after it.
+  systemd.services.ensure-printers = {
+    wants = [ "network-online.target" ];
+    after = [
+      "network-online.target"
+      "tailscaled.service"
+      "tailscaled-autoconnect.service"
+    ];
+  };
+
   services.avahi = {
     enable = true;
     nssmdns4 = true;
