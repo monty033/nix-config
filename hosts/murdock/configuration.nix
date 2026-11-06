@@ -426,7 +426,7 @@ in
     browsing = true;
   };
 
-  # Canon imageCLASS MF650C Series (192.168.86.202). The printer advertises
+  # Canon imageCLASS MF650C Series (192.168.20.40, guest network). The printer advertises
   # AirPrint 2.1 / IPP Everywhere, so the queue is expressed driverless
   # (`model = everywhere`) and no vendor UFR II driver is installed.
   hardware.printers = {
@@ -435,7 +435,7 @@ in
         name = "Canon_MF650C";
         location = "Home";
         description = "Canon imageCLASS MF650C Series";
-        deviceUri = "ipp://192.168.86.202/ipp/print";
+        deviceUri = "ipp://192.168.20.40/ipp/print";
         model = "everywhere";
       }
     ];
