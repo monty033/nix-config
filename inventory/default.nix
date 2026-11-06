@@ -159,9 +159,9 @@
       reservation-202 = {
         network = {
           hostname = null;
-          address = "192.168.86.202";
+          address = "192.168.20.40";
           identityRef = "reservation-202";
-          interface = "lan";
+          interface = "guest";
           piholeGroup = "normal";
         };
       };
