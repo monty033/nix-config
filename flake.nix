@@ -33,7 +33,17 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at de7922e. A content edit no longer changes a
+    # Pinned to NookBridge main at 30b3beb. The decoder can now say why a
+    # note cannot be written rather than reporting every refusal the same way.
+    # Every whole-document decode failure carries a closed internal reason and
+    # one of five classes, and the worst fault decides the class, so a
+    # document classed `uninterpretable` has been shown to contain nothing
+    # hostile or over a limit. A failure raised before the body is scanned is
+    # `unclassified` and is never preservable. Operators gain
+    # `notes.edit-census`: read-only, counts only, visibility-filtered, capped,
+    # and unreachable from the daemon's own RPC surface (#293).
+    #
+    # Earlier pin de7922e. A content edit no longer changes a
     # note's list kind. `notes.update` with a `content` patch and no
     # `listKind` substituted the default `simple-checklist`, so every
     # `task-list` became a plain checklist on its next edit, and echoing back
@@ -176,7 +186,7 @@
     # accounting are unchanged from the previous pin.
     #
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=de7922e1d2e198f071c735b4bec49061bca11f1d";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=30b3beb72f658b4b36e4e8551d24daf2b87a51f1";
       flake = false;
     };
 
