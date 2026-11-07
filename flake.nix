@@ -33,7 +33,11 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 30b3beb. The decoder can now say why a
+    # Pinned to NookBridge main at 51616b1. The census added in 30b3beb is now
+    # exposed through `nookctl notes edit-census`, an operator CLI client that
+    # is read-only and ungated like browse/get (NookBridge #294).
+    #
+    # Earlier pin 30b3beb. The decoder can now say why a
     # note cannot be written rather than reporting every refusal the same way.
     # Every whole-document decode failure carries a closed internal reason and
     # one of five classes, and the worst fault decides the class, so a
@@ -186,7 +190,7 @@
     # accounting are unchanged from the previous pin.
     #
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=30b3beb72f658b4b36e4e8551d24daf2b87a51f1";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=51616b1a8adca3f9d86502bd1f954f4ed1034b1b";
       flake = false;
     };
 
