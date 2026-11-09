@@ -31,6 +31,9 @@
   # Open ports in the firewall.
   # networking.firewall.allowedTCPPorts = [ ... ];
   # networking.firewall.allowedUDPPorts = [ ... ];
+  # mDNS answers arrive as multicast; the default firewall drops non-unicast
+  # packets with no accept rule, so the browser's cast picker saw no devices.
+  networking.firewall.allowedUDPPorts = [ 5353 ];
   # Or disable the firewall altogether.
   # networking.firewall.enable = false;
 
