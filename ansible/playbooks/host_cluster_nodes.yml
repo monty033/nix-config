@@ -15,7 +15,7 @@
     - name: TAILSCALE
       include_tasks: tasks/install_and_setup_tailscale.yml
       vars:
-        ts_args: "--advertise-routes={{tailscale_routes|default('192.168.86.0/24')}} --advertise-exit-node"
+        ts_args: "--advertise-routes={{tailscale_routes|default('192.168.86.0/24,192.168.10.0/24,192.168.20.0/24')}} --advertise-exit-node"
     - name: UPDATE SYSTEM
       include_tasks: tasks/update_system.yml
     - name: INSTALL PACKAGES
