@@ -10,6 +10,15 @@
 {config, lib, pkgs, inputs, ...}:
 with lib; let
   cfg = config.extra-services.tailscale;
+  # Rules this unit owns live in prefs 5000-5099, a range nothing else on these
+  # hosts uses. Clearing them before re-adding makes a changed or emptied
+  # localSubnets list take effect instead of leaving stale rules behind, and the
+  # same clearing runs on stop so the rules do not outlive their configuration.
+  clearLocalRules = ''
+    for pref in $(${pkgs.iproute2}/bin/ip rule show | ${pkgs.gawk}/bin/awk '/^50[0-9][0-9]:/ && /lookup main/ {sub(":","",$1); print $1}'); do
+      ${pkgs.iproute2}/bin/ip rule del pref "$pref" 2>/dev/null || true
+    done
+  '';
 in {
   options.extra-services.tailscale = {
     enable = mkEnableOption "enable tailscale config";
@@ -40,6 +49,52 @@ in {
       default = false;
       description = "Use the ephemeral auth key instead of the standard auth key";
     };
+    acceptRoutes = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Accept routes advertised by other tailnet nodes.
+
+        This is on by default because hosts need it to reach subnets that exist
+        only behind the tailnet, such as the wakanda site. Accepting routes alone
+        is not enough to keep local traffic correct: a host that answers devices
+        on another VLAN would send the reply out the tailnet interface instead of
+        back through the router. localSubnets below fixes that by keeping the
+        local subnets on the main routing table.
+
+        Set this to false on a host that never needs the remote site; it accepts
+        no advertised routes at all.
+      '';
+    };
+    advertiseRoutes = mkOption {
+      type = types.listOf (types.strMatching "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}");
+      default = [ ];
+      example = [ "192.168.86.0/24" "192.168.10.0/24" ];
+      description = ''
+        Subnets to advertise into the tailnet, making this host a subnet router.
+        Each still needs approval in the Tailscale admin console. Advertising
+        gives remote devices access to a subnet; accepting routes is a separate
+        per-host decision (see acceptRoutes).
+      '';
+    };
+    localSubnets = mkOption {
+      type = types.listOf (types.strMatching "[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}");
+      default = [ "192.168.86.0/24" "192.168.10.0/24" "192.168.20.0/24" ];
+      example = [ "192.168.86.0/24" ];
+      description = ''
+        Subnets this host shares with its LAN neighbours, reachable through the
+        router. Traffic to them is looked up in the main routing table before
+        the tailnet table, so replies to devices on another VLAN (IoT, guest)
+        return the way they came. Without it the tailnet route wins, the reply
+        never reaches the client, and services look healthy while clients get
+        nothing.
+
+        The defaults are this LAN's subnets, which is right for every host here.
+        A host that lives somewhere else, such as at a remote site, must set this
+        to [ ] or its own subnets; otherwise its traffic to these subnets would
+        be handed to its local router instead of the tailnet.
+      '';
+    };
   };
 
   imports = [
@@ -47,6 +102,12 @@ in {
   ];
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = length cfg.localSubnets <= 100;
+        message = "extra-services.tailscale.localSubnets: at most 100 entries (rules occupy prefs 5000-5099)";
+      }
+    ];
     sops = {
       secrets = {
         "tailscale_auth_key" = {};
@@ -64,14 +125,17 @@ in {
       authKeyFile = if cfg.ephemeral
         then config.sops.secrets.tailscale_ephemeral_key.path
         else config.sops.secrets.tailscale_auth_key.path;
-      useRoutingFeatures = "client";
+      useRoutingFeatures = if cfg.advertiseRoutes != [ ] then "server" else "client";
       permitCertUid = "caddy";
       extraUpFlags = [
         "--force-reauth"
         "--reset"
         "--ssh"
-        "--accept-routes"
-      ] ++ (optionals cfg.lxc [
+      ]
+      ++ optional cfg.acceptRoutes "--accept-routes"
+      ++ optional (cfg.advertiseRoutes != [ ])
+        "--advertise-routes=${concatStringsSep "," cfg.advertiseRoutes}"
+      ++ (optionals cfg.lxc [
         "--accept-dns=false"
       ]) ++ (optionals (!cfg.lxc) [
         "--accept-dns=true"
@@ -151,40 +215,45 @@ in {
     networking.nameservers = mkIf (!cfg.lxc) [ "100.100.100.100" "1.1.1.1" ];
     networking.search = mkIf (!cfg.lxc) [ "skink-galaxy.ts.net" ];
 
-    # Fix for local network routing conflict with Tailscale in LXC
-    # Timer to periodically check and remove the route
-    systemd.timers.fix-tailscale-local-routing = mkIf cfg.lxc {
-      description = "Timer for removing local subnet route from Tailscale routing table";
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnBootSec = "15s";
-        OnUnitActiveSec = "30s";
-        Unit = "fix-tailscale-local-routing.service";
+    # Traffic for the subnets this host shares with its LAN neighbours must be
+    # resolved by the main table, not by the routes Tailscale accepts from other
+    # nodes. Without this a reply to a device on another VLAN leaves through the
+    # tailnet interface and never comes back, which is what took guest DNS down
+    # twice (2026-10-05, 2026-11-09) while the resolver looked healthy.
+    #
+    # An explicit route via tailscale0 does NOT work as a substitute: tailscaled
+    # drops packets for a subnet it has not accepted (measured 2026-11-09, 100%
+    # loss with both a main-table and a table-52 route). The accepted routes stay
+    # in place and the lookup order is changed instead, which keeps the remote
+    # site reachable and sends local traffic back through the router.
+    systemd.services.tailscale-local-route-priority =
+      mkIf (!cfg.userspace-networking) {
+        description = "Route local subnets through the main routing table, not the tailnet";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "network.target" "systemd-networkd.service" ];
+        # networkd treats foreign policy rules as its own to manage and drops them
+        # when it reconfigures (ManageForeignRoutingPolicyRules defaults to yes),
+        # so a networkd restart has to re-run this unit.
+        partOf = [ "systemd-networkd.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          ${clearLocalRules}
+          ${concatStringsSep "\n" (imap0 (i: subnet: ''
+            ${pkgs.iproute2}/bin/ip rule add to ${escapeShellArg subnet} lookup main pref ${toString (5000 + i)}
+            echo "routed ${subnet} through the main table"
+          '') cfg.localSubnets)}
+        '';
+        # Runs when the unit is stopped, including on a switch that removes it,
+        # so the rules do not outlive the configuration that asked for them.
+        postStop = clearLocalRules;
       };
-    };
 
-    systemd.services.fix-tailscale-local-routing = mkIf cfg.lxc {
-      description = "Remove local subnet route from Tailscale routing table";
-      after = [ "tailscaled.service" ];
-      wants = [ "tailscaled.service" ];
+    # Note: forwarding (net.ipv4.ip_forward, and the loose reverse-path filter a
+    # subnet router needs) comes from services.tailscale.useRoutingFeatures =
+    # "server" above, which is set automatically when advertiseRoutes is used.
 
-      serviceConfig = {
-        Type = "oneshot";
-      };
-
-      script = ''
-        # Check if Tailscale interface exists
-        if ! ${pkgs.iproute2}/bin/ip link show tailscale0 > /dev/null 2>&1; then
-          echo "Tailscale interface not yet up, skipping"
-          exit 0
-        fi
-
-        # Delete the problematic route if it exists
-        if ${pkgs.iproute2}/bin/ip route show table 52 | ${pkgs.gnugrep}/bin/grep -q "192.168.86.0/24 dev tailscale0"; then
-          ${pkgs.iproute2}/bin/ip route del 192.168.86.0/24 dev tailscale0 table 52 2>/dev/null && \
-            echo "$(date): Removed 192.168.86.0/24 route from Tailscale routing table"
-        fi
-      '';
-    };
   };
 }
