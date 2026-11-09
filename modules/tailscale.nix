@@ -10,6 +10,10 @@
 {config, lib, pkgs, inputs, ...}:
 with lib; let
   cfg = config.extra-services.tailscale;
+  # The reconcile unit below is the only writer of the configured value.
+  # `tailscale up --reset` resets the preference to the default, so `up` must not
+  # carry the flag: it runs at enrolment, before the guard rules exist.
+  acceptRoutesArg = "--accept-routes=${if cfg.acceptRoutes then "true" else "false"}";
   # Rules this unit owns live in prefs 5000-5099, a range nothing else on these
   # hosts uses. Clearing them before re-adding makes a changed or emptied
   # localSubnets list take effect instead of leaving stale rules behind, and the
@@ -63,7 +67,12 @@ in {
         local subnets on the main routing table.
 
         Set this to false on a host that never needs the remote site; it accepts
-        no advertised routes at all.
+        no advertised routes at all. The value is applied on boot by
+        tailscale-accept-routes.service, not at enrolment, so a node enrolled by
+        hand after boot picks it up at its next boot or when
+        `systemctl restart tailscale-accept-routes` is run. Hosts running
+        tailscale in userspace mode are excluded: neither routing unit is
+        installed there, so the value has no effect on them.
       '';
     };
     advertiseRoutes = mkOption {
@@ -132,7 +141,6 @@ in {
         "--reset"
         "--ssh"
       ]
-      ++ optional cfg.acceptRoutes "--accept-routes"
       ++ optional (cfg.advertiseRoutes != [ ])
         "--advertise-routes=${concatStringsSep "," cfg.advertiseRoutes}"
       ++ (optionals cfg.lxc [
@@ -214,6 +222,64 @@ in {
     # Non-LXC DNS configuration uses standard networking options
     networking.nameservers = mkIf (!cfg.lxc) [ "100.100.100.100" "1.1.1.1" ];
     networking.search = mkIf (!cfg.lxc) [ "skink-galaxy.ts.net" ];
+
+    # `--accept-routes` is only read when a node enrols. A node that is already
+    # registered keeps whatever preference it last had, so a rebuild or a reboot
+    # does not move it and the option above would be decorative on every host
+    # that exists today. Reconcile it against the daemon on every boot.
+    #
+    # Advertising is deliberately not touched here: several hosts advertise
+    # through other tooling, and clearing an unset list would remove their
+    # routes from the tailnet.
+    systemd.services.tailscale-accept-routes =
+      mkIf (!cfg.userspace-networking) {
+        description = "Reconcile the tailscale accept-routes preference with the configuration";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "tailscaled.service" "tailscaled-autoconnect.service" "tailscale-local-route-priority.service" ];
+        # Requires, not Wants: `after` only orders, so a failed guard would still
+        # let acceptance switch on with no rules protecting the return path. It is
+        # required only when turning acceptance on, so disabling can never be
+        # blocked by a broken guard.
+        requires = optional cfg.acceptRoutes "tailscale-local-route-priority.service";
+        # A switch that re-runs the enrolment unit (a changed advertise list, for
+        # example) resets the preference, so restart this one alongside it.
+        partOf = [ "tailscaled-autoconnect.service" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          # A hung CLI must end as a failed unit, not a unit that never finishes.
+          # 200s covers the worst case of the loop below: 15 calls at the 10s
+          # timeout plus 14 two-second sleeps.
+          TimeoutStartSec = "200s";
+        };
+        # Residual risk: a switch that restarts the guard unit reinstalls the
+        # rules while acceptance is already on. The window is milliseconds and
+        # the rules are re-added before any new connection is routed.
+        script = ''
+          ts=${config.services.tailscale.package}/bin/tailscale
+          last=
+          for attempt in $(${pkgs.coreutils}/bin/seq 1 15); do
+            if last=$(${pkgs.coreutils}/bin/timeout 10 "$ts" set ${acceptRoutesArg} 2>&1); then
+              echo "accept-routes applied"
+              exit 0
+            fi
+            [ "$attempt" = 15 ] || sleep 2
+          done
+          # The daemon never answered. Report success only when the node is
+          # genuinely unenrolled: the value is applied at the next boot, or when
+          # this unit is restarted after enrolment. NoState is the daemon still
+          # starting, so a daemon wedged there is a failure, not an unenrolled node.
+          backend=$(${pkgs.coreutils}/bin/timeout 10 "$ts" status --json 2>/dev/null | ${pkgs.gnugrep}/bin/grep -o '"BackendState"[[:space:]]*:[[:space:]]*"[^"]*"' | ${pkgs.coreutils}/bin/head -n1 || true)
+          case "$backend" in
+            *NeedsLogin*)
+              echo "not enrolled yet; the preference is applied at the next boot, or by restarting this unit after enrolment"
+              exit 0
+              ;;
+          esac
+          echo "could not apply ${acceptRoutesArg} after 15 attempts: $last"
+          exit 1
+        '';
+      };
 
     # Traffic for the subnets this host shares with its LAN neighbours must be
     # resolved by the main table, not by the routes Tailscale accepts from other
