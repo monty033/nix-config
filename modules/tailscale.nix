@@ -234,7 +234,7 @@ in {
     systemd.services.tailscale-accept-routes =
       mkIf (!cfg.userspace-networking) {
         description = "Reconcile the tailscale accept-routes preference with the configuration";
-        wantedBy = [ "multi-user.target" ];
+        wantedBy = [ "multi-user.target" "tailscaled.service" ];
         after = [ "tailscaled.service" "tailscaled-autoconnect.service" "tailscale-local-route-priority.service" ];
         # Requires, not Wants: `after` only orders, so a failed guard would still
         # let acceptance switch on with no rules protecting the return path. It is
@@ -242,8 +242,9 @@ in {
         # blocked by a broken guard.
         requires = optional cfg.acceptRoutes "tailscale-local-route-priority.service";
         # A switch that re-runs the enrolment unit (a changed advertise list, for
-        # example) resets the preference, so restart this one alongside it.
-        partOf = [ "tailscaled-autoconnect.service" ];
+        # example) resets the preference, so restart this one alongside it; the
+        # tailscaled dependency in wantedBy does the same for a daemon restart.
+        partOf = [ "tailscaled-autoconnect.service" "tailscaled.service" ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
@@ -295,11 +296,14 @@ in {
     systemd.services.tailscale-local-route-priority =
       mkIf (!cfg.userspace-networking) {
         description = "Route local subnets through the main routing table, not the tailnet";
-        wantedBy = [ "multi-user.target" ];
+        wantedBy = [ "multi-user.target" "systemd-networkd.service" ];
         after = [ "network.target" "systemd-networkd.service" ];
         # networkd treats foreign policy rules as its own to manage and drops them
         # when it reconfigures (ManageForeignRoutingPolicyRules defaults to yes),
-        # so a networkd restart has to re-run this unit.
+        # so a networkd restart has to re-run this unit. partOf stops it with
+        # networkd; being wanted by networkd is what starts it again - partOf
+        # alone leaves it stopped, because its multi-user want is already
+        # satisfied and nothing pulls it back.
         partOf = [ "systemd-networkd.service" ];
         serviceConfig = {
           Type = "oneshot";
