@@ -626,6 +626,37 @@ in
     group = "users";
     mode = "0400";
   };
+  # Managed-switch admin passwords, one entry per switch keyed by management
+  # IP: the key survives a switch rename, and rotating one is a single sops
+  # edit. sops activation materialises each of them on every boot; what does not
+  # happen is any unit consuming them, so no restartUnits is set. They are owned
+  # by the hermes account because that is the account the switch tooling runs
+  # as, and a 0400 file leaves that account with the only read.
+  sops.secrets."switch-192-168-86-2-password" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+  };
+  sops.secrets."switch-192-168-86-3-password" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+  };
+  sops.secrets."switch-192-168-86-4-password" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+  };
+  sops.secrets."switch-192-168-86-5-password" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+  };
+  sops.secrets."switch-192-168-86-6-password" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+  };
 
   programs.git = {
     enable = true;
