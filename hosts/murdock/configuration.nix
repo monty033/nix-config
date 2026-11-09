@@ -277,8 +277,13 @@ in
   environment.etc."systemd/system-sleep/fix-bluetooth-fprintd".source = pkgs.writeShellScript "fix-bluetooth-fprintd" ''
     set -eu
 
+    # systemd-sleep runs hooks with a minimal PATH that does not include
+    # coreutils, so every external command must be referenced by store path.
     sleep_bin="${pkgs.coreutils}/bin/sleep"
+    timeout_bin="${pkgs.coreutils}/bin/timeout"
     systemctl_bin="${pkgs.systemd}/bin/systemctl"
+    fprintd_verify_bin="${pkgs.fprintd}/bin/fprintd-verify"
+    pkill_bin="${pkgs.procps}/bin/pkill"
 
     find_usb_device() {
       wanted_vendor="$1"
@@ -309,40 +314,95 @@ in
       [ -w "$dev_path/power/autosuspend" ] && printf '%s\n' '-1' > "$dev_path/power/autosuspend" || true
     }
 
-    rebind_usb_device() {
-      dev="$1"
-      dev_path="/sys/bus/usb/devices/$dev"
-      [ -d "$dev_path" ] || return 0
-      driver_path="$dev_path/driver"
-      [ -L "$driver_path" ] || return 0
-      driver_dir="$(readlink -f "$driver_path")"
-      [ -w "$driver_dir/unbind" ] && printf '%s\n' "$dev" > "$driver_dir/unbind" || true
-      "$sleep_bin" 1
-      [ -w "$driver_dir/bind" ] && printf '%s\n' "$dev" > "$driver_dir/bind" || true
-    }
-
-    case $1 in
+    case "$1" in
       pre)
         "$systemctl_bin" stop fprintd.service || true
         "$systemctl_bin" stop bluetooth.service || true
         ;;
       post)
+        # Drop any daemon carrying a stale claim from before the sleep
+        # transition; a fresh one is warmed below.
+        "$systemctl_bin" stop fprintd.service || true
+
+        # Let the xHCI controller finish re-initialising before touching the
+        # devices that hang off it.
         "$sleep_bin" 2
 
         bluetooth_usb_device="$(find_usb_device 8087 0026 || true)"
         fingerprint_usb_device="$(find_usb_device 06cb 00bd || true)"
 
+        if [ -n "$fingerprint_usb_device" ]; then
+          fingerprint_path="/sys/bus/usb/devices/$fingerprint_usb_device"
+
+          # The controller reset on resume leaves the Synaptics reader in a
+          # state where the first fprintd open can fail with protocol error
+          # 789.  Deauthorising and reauthorising the device tears down and
+          # reprobes its USB interfaces, which clears that state more
+          # thoroughly than unbinding the generic usb driver.
+          if [ -w "$fingerprint_path/authorized" ]; then
+            if ! printf '0\n' > "$fingerprint_path/authorized"; then
+              printf 'fix-bluetooth-fprintd: failed to deauthorize %s\n' "$fingerprint_usb_device" >&2
+            fi
+            "$sleep_bin" 1
+
+            if ! printf '1\n' > "$fingerprint_path/authorized"; then
+              printf 'fix-bluetooth-fprintd: failed to reauthorize %s\n' "$fingerprint_usb_device" >&2
+            fi
+            "$sleep_bin" 1
+          fi
+        fi
+
         [ -n "$bluetooth_usb_device" ] && set_usb_power_policy "$bluetooth_usb_device"
         [ -n "$fingerprint_usb_device" ] && set_usb_power_policy "$fingerprint_usb_device"
 
+        # The first libfprint open after the resume reset can fail with
+        # protocol error 789 even after re-enumeration; the next open works.
+        # Absorb that failing open here, retrying until the reader
+        # initialises, so the lock screen's first attempt is already a warm
+        # open.  If warm-up succeeds, keep fprintd running so the greeter's
+        # fresh PAM conversation connects to the warmed daemon; otherwise
+        # stop it and let D-Bus activation retry on demand.
         if [ -n "$fingerprint_usb_device" ]; then
-          rebind_usb_device "$fingerprint_usb_device"
-          "$sleep_bin" 1
+          # patrick has the enrolled fingerprint; only the reader needs to be
+          # initialised, not a successful match.
+          warmup_user="patrick"
+          warmup_attempt=0
+          warmup_ready=0
+
+          while [ "$warmup_attempt" -lt 4 ]; do
+            "$systemctl_bin" stop fprintd.service >/dev/null 2>&1 || true
+            warmup_output="$("$timeout_bin" 2 "$fprintd_verify_bin" "$warmup_user" 2>&1 || true)"
+
+            case "$warmup_output" in
+              *"Verify started!"*)
+                warmup_ready=1
+                break
+                ;;
+            esac
+
+            warmup_attempt=$((warmup_attempt + 1))
+            "$sleep_bin" 1
+          done
+
+          # Keep the warmed daemon running for the lock screen.  Stopping it
+          # here makes the lock screen's already-started PAM conversation see
+          # the D-Bus name owner change, which breaks its first attempt.
+          if [ "$warmup_ready" -eq 0 ]; then
+            "$systemctl_bin" stop fprintd.service >/dev/null 2>&1 || true
+            printf 'fix-bluetooth-fprintd: fingerprint warm-up failed after %s attempts\n' "$warmup_attempt" >&2
+          fi
+
+          # KDE's pre-sleep greeter keeps a PAM conversation tied to the old
+          # fprintd D-Bus name owner.  Restart it so the post-resume prompt
+          # establishes a fresh conversation against the warmed daemon
+          # instead of aborting with "name owner changed".
+          "$pkill_bin" -KILL -f '^/[^ ]*/libexec/kscreenlocker_greet( |$)' >/dev/null 2>&1 || true
         fi
 
-        "$systemctl_bin" reset-failed bluetooth.service fprintd.service || true
+        "$systemctl_bin" reset-failed bluetooth.service fprintd.service 2>/dev/null || true
         "$systemctl_bin" start bluetooth.service || true
-        "$systemctl_bin" start fprintd.service || true
+        # fprintd is either already running from the warm-up above or will be
+        # D-Bus activated by the lock screen; do not start it explicitly here.
         ;;
     esac
   '';
