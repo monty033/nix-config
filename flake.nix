@@ -33,9 +33,13 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 51616b1. The census added in 30b3beb is now
-    # exposed through `nookctl notes edit-census`, an operator CLI client that
-    # is read-only and ungated like browse/get (NookBridge #294).
+    # Pinned to NookBridge main at d54c140. The query parser behind
+    # `nookctl notes search --stdin` strips one trailing line terminator and
+    # enforces the daemon's query bound (NookBridge #295).
+    #
+    # Earlier pin 51616b1. The census added in 30b3beb is exposed through
+    # `nookctl notes edit-census`, an operator CLI client that is read-only and
+    # ungated like browse/get (NookBridge #294).
     #
     # Earlier pin 30b3beb. The decoder can now say why a
     # note cannot be written rather than reporting every refusal the same way.
@@ -190,7 +194,7 @@
     # accounting are unchanged from the previous pin.
     #
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=51616b1a8adca3f9d86502bd1f954f4ed1034b1b";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=d54c140d3e6337034344312cc1fcb9f4e94eb913";
       flake = false;
     };
 
