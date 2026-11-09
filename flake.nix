@@ -193,8 +193,18 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     #
+    # `notes.edit-census --handle <handle>` reported `missing` (not_found) for
+    # a note `notes.search-operator` had just returned a handle for and
+    # `notes.get` served, because the scoped census looked the note up only in
+    # the visibility listing. The listing is narrower than what the read path
+    # serves, so a named note is now decided directly by the visibility layer.
+    # Deciding can fail, so it is three-valued: admitted, hidden, or
+    # undecidable — an undecidable note is `service_unavailable`, not
+    # `not_found`, and a hidden one is still reported missing without its
+    # snapshot being read. The corpus census is unchanged in scope: it still
+    # enumerates the listing, which is bounded upstream at 256 notes.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=d54c140d3e6337034344312cc1fcb9f4e94eb913";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=7a76299d454f437e4ae6490aa92950a892c93617";
       flake = false;
     };
 
