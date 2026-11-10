@@ -33,7 +33,16 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at d54c140. The query parser behind
+    # Pinned to NookBridge main at 23b9312. A preserved block may carry an
+    # optional readable `text` rendered from its own bytes by the read-only
+    # renderer, bounded per block and per document, and bound to the preimage
+    # (NookBridge #297).
+    #
+    # Earlier pin 7a76299. The scoped census decides visibility for a named
+    # note, so a search handle can be measured even when it is absent from the
+    # narrower browser listing (NookBridge #296).
+    #
+    # Earlier pin d54c140. The query parser behind
     # `nookctl notes search --stdin` strips one trailing line terminator and
     # enforces the daemon's query bound (NookBridge #295).
     #
@@ -204,7 +213,7 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=7a76299d454f437e4ae6490aa92950a892c93617";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=23b931265ed34916e72d8386a7722fc118776610";
       flake = false;
     };
 
