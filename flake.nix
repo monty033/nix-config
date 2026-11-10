@@ -517,6 +517,12 @@
       modules = commonModules ++ [ ./hosts/nxc/wallabag ];
     };
 
+    ## heimdall ##
+    nixosConfigurations.heimdall = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = commonModules ++ [ ./hosts/nxc/heimdall ];
+    };
+
     ## karakeep ##
     nixosConfigurations.karakeep = nixpkgs.lib.nixosSystem {
       specialArgs = { inherit inputs; };
