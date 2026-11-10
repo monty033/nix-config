@@ -859,17 +859,17 @@ in
 
       # Fallbacks are availability routes, not quality routing. Each entry is a
       # separate transport, so one failing leaves the others open: minimax
-      # first (it also carries the auxiliary lanes), then Sonnet on the
-      # subscription provider, then Codex (GPT-6 Luna).
+      # first (it also carries the auxiliary lanes), then Haiku on the
+      # subscription provider.
       fallback_providers = [
         { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
-        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
-        { provider = "openai-codex"; model = "gpt-6-luna"; }
+        { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
       ];
 
-      # Mixture of Agents presets. Keep two explicit cross-provider choices:
-      #   - standard (default): Haiku + Luna advise a Sol aggregator.
-      #   - max: Sol + Sonnet advise an Opus aggregator for deliberate,
+      # Mixture of Agents presets. Each keeps two reference models and one
+      # aggregator, drawn from the Claude subscription, MiniMax and OpenCode Go:
+      #   - standard (default): Haiku + MiniMax M3.1 advise a DeepSeek aggregator.
+      #   - max: DeepSeek + Sonnet advise an Opus aggregator for deliberate,
       #     expensive one-shot work.
       # Retired presets remain explicitly disabled because the NixOS module
       # deep-merges settings into mutable config.yaml and omitted keys survive.
@@ -881,11 +881,11 @@ in
         presets.standard = {
           reference_models = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
-            { provider = "openai-codex"; model = "gpt-6-luna"; }
+            { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
           ];
           aggregator = {
-            provider = "openai-codex";
-            model = "gpt-6.1-sol";
+            provider = "opencode-go";
+            model = "deepseek-v4.1-flash";
           };
           max_tokens = 4096;
           reference_max_tokens = 600;
@@ -893,7 +893,7 @@ in
         };
         presets.max = {
           reference_models = [
-            { provider = "openai-codex"; model = "gpt-6.1-sol"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
           aggregator = {
@@ -1240,15 +1240,15 @@ in
       };
 
       platforms = {
-        # Voice Assistant endpoint. Keep the latency-sensitive route on Luna
+        # Voice Assistant endpoint. Keep the latency-sensitive route on Haiku
         # without changing the configured default route for other clients.
         api_server = {
           enabled = true;
           extra = {
             model_name = "hermes-agent";
             model_routes.bernie-voice = {
-              provider = "openai-codex";
-              model = "gpt-6-luna";
+              provider = "claude-subscription-directsdk-experimental";
+              model = "claude-haiku-5-5";
             };
           };
         };
