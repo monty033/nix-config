@@ -752,7 +752,7 @@ in
       # Claude Pro/Max via the official Claude Code CLI. The default
       # conversation route runs on the reseller gateway, so this plugin supplies
       # the delegation route (Haiku), the subscription fallback route, and the
-      # Claude aliases; Codex stays as the last, independent fallback.
+      # Claude aliases.
       claudeSubscriptionDirectsdkPlugin
       # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
       # the recipient allowlist comes from the hermes-proton-env sops secret
@@ -790,15 +790,13 @@ in
       # interchangeable across routes. No per-model compaction override is
       # declared (see compression below), so it uses the global 300k cap like
       # other models — deliberately short of its 1M window. Delegation runs
-      # Haiku (below); GPT-6 Luna stays an explicit alias (luna), because
-      # explicit aliases preserve manual model selection when needed.
+      # Haiku (below).
       model = {
         default = "deepseek-v4.1-flash";
         provider = "opencode-go";
-        # Luna's actual reasoning level is set via agent.reasoning_overrides
-        # below ("gpt-6-luna" = "high"), not here — `model.reasoning_effort`
-        # is not a recognized key in this section's schema and was a dead
-        # setting kept in sync by coincidence with the real override.
+        # Reasoning effort per model lives in agent.reasoning_overrides below.
+        # `model.reasoning_effort` is not a recognized key in this section's
+        # schema, so it is not set here.
         # User-defined model aliases — resolved before catalog lookup.
         # Checked BEFORE built-in short names (sonnet/grok/...).
         # See hermes_cli/model_switch.py::resolve_alias().
@@ -807,8 +805,6 @@ in
           haiku = "claude-subscription-directsdk-experimental/claude-haiku-5-5";
           sonnet = "claude-subscription-directsdk-experimental/claude-sonnet-5-5";
           opus = "claude-subscription-directsdk-experimental/claude-opus-5-5[1m]";
-          luna = "openai-codex/gpt-6-luna";
-          sol = "openai-codex/gpt-6.1-sol";
           mm = "minimax/MiniMax-M3.1-Flash";
           # The default conversation model on its default route. The `flash`
           # name keeps pointing at whatever the default route is.
@@ -1035,8 +1031,7 @@ in
       # They never receive generic file, shell, browser, or Google tools.
       platform_toolsets.api_server = [ "homeassistant" "health_log" ];
       # claude-subscription-directsdk-experimental provides the Claude aliases
-      # and the subscription fallbacks; openai-codex remains the last
-      # independent fallback.
+      # and the subscription fallbacks.
       plugins.enabled = [
         "health-log"
         "hermes-mnemosyne"
@@ -1114,7 +1109,7 @@ in
         # resolves to, so switching between those routes keeps the same effort.
         # Haiku's entry covers sessions that select Haiku directly; delegation
         # children take their effort from `delegation.reasoning_effort` above.
-        # The general route baseline remains medium, as does Sol by inheritance.
+        # The general route baseline remains medium.
         # Session-scoped /reasoning --session always wins for that session.
         reasoning_overrides = {
           "deepseek-flash" = "high";
@@ -1122,9 +1117,6 @@ in
           "claude-haiku-5-5" = "high";
           "claude-sonnet-5-5" = "medium";
           "claude-opus-5-5[1m]" = "medium";
-          "gpt-6-luna" = "high";
-          # gpt-6.1-sol is intentionally absent: it inherits the route-level
-          # default (medium). Per-session /reasoning still wins for one-offs.
         };
         # Surface-aware verify-before-finish: ON for CLI/TUI/desktop/programmatic
         # surfaces where the verification narrative is useful, OFF for messaging
@@ -1440,6 +1432,293 @@ in
   # loudly instead of skipping, and a swapped-in symlink matches nothing: no
   # chown, no chmod, exit 0 — the intended no-op, though it leaves no trace in the
   # activation log. The chown re-asserts the ownership the module declares.
+  # One-time cleanup of the retired Codex aliases and reasoning override. The
+  # upstream config merge only adds and overwrites keys, so removing them from
+  # this file left them live in the mutable config. This deletes exactly those
+  # entries, keeps every other key, and preserves the file's owner and mode.
+  # It is idempotent and never blocks activation. Remove this activation step
+  # after one successful rebuild has verified the entries are gone.
+  system.activationScripts.hermes-prune-codex-aliases = {
+    deps = [ "hermes-agent-setup" ];
+    text = ''
+      hermes_cfg=/var/lib/hermes/.hermes/config.yaml
+      if [ -f "$hermes_cfg" ]; then
+        # Non-fatal: a failure here warns and never blocks activation.
+        ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 -c '
+import copy
+import os
+import re
+import sys
+import tempfile
+
+import yaml
+from pathlib import Path
+
+# Retired Codex entries. An alias is only removed while it still points at a
+# Codex model, so a repointed alias is left alone with a warning.
+RETIRED_ALIASES = {"luna", "sol"}
+CODEX_PREFIX = "openai-codex/"
+RETIRED_OVERRIDE_KEY = "gpt-6-luna"
+
+
+def block_end(lines, start, indent):
+    """Index of the first line after the mapping block that starts at `start`."""
+    for j in range(start + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        cur = len(lines[j]) - len(lines[j].lstrip())
+        if cur <= indent:
+            return j
+    return len(lines)
+
+
+def find_top_level(lines, header):
+    """Locate a top-level mapping key. Only column 0 counts."""
+    for i, line in enumerate(lines):
+        if line.strip() != header:
+            continue
+        if line.rstrip().endswith(":") and not line.startswith((" ", "\t")):
+            return i
+    return None
+
+
+def find_child(lines, parent_header, child_header):
+    """Locate a child mapping block inside a top-level parent block.
+
+    The parent must be a top-level key, so a same-named mapping nested under
+    another section (for example delegation.model) can never be mistaken for
+    it.
+    """
+    parent = find_top_level(lines, parent_header)
+    if parent is None:
+        return None
+    parent_end = block_end(lines, parent, 0)
+    for j in range(parent + 1, parent_end):
+        line = lines[j]
+        if line.strip() != child_header or not line.rstrip().endswith(":"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= 0:
+            continue
+        return j, block_end(lines, j, indent)
+    return None
+
+
+def key_pattern(key):
+    """Match `key:` and the quoted forms a YAML emitter may use."""
+    return re.compile(r"^\s*\"?%s\"?\s*:" % re.escape(key))
+
+
+def remove_key_lines(lines, span, key):
+    """Remove the first `key:` entry from the block described by `span`."""
+    start, end = span
+    pattern = key_pattern(key)
+    kept = []
+    removed = False
+    for i, line in enumerate(lines):
+        if not removed and start < i < end and pattern.match(line):
+            removed = True
+            continue
+        kept.append(line)
+    if not removed:
+        return lines, False
+    return kept, True
+
+
+def find_key_anywhere(node, target, path=""):
+    """Every path at which `target` appears as a mapping key."""
+    found = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            here = f"{path}.{key}" if path else str(key)
+            if key == target:
+                found.append(here)
+            found.extend(find_key_anywhere(value, target, here))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            found.extend(find_key_anywhere(value, target, f"{path}[{i}]"))
+    return found
+
+
+def main():
+    raw_path = sys.argv[1]
+    # Resolve symlinks so a linked config is pruned in place, not replaced by a
+    # regular file.
+    path = Path(os.path.realpath(raw_path))
+    if not path.is_file():
+        print("hermes-prune-codex-aliases: no config file, nothing to do")
+        return 0
+
+    try:
+        original = path.read_text(encoding="utf-8-sig")
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: unreadable config, skipped ({exc.__class__.__name__})")
+        return 0
+    try:
+        before = yaml.safe_load(original)
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: unparsable config, skipped ({exc.__class__.__name__})")
+        return 0
+    if not isinstance(before, dict):
+        print("hermes-prune-codex-aliases: config is not a mapping, skipped")
+        return 0
+
+    model = before.get("model")
+    aliases = model.get("aliases") if isinstance(model, dict) else None
+    agent = before.get("agent")
+    overrides = agent.get("reasoning_overrides") if isinstance(agent, dict) else None
+
+    lines = original.splitlines(keepends=True)
+    notes = []
+    warnings = []
+    removed_aliases = set()
+    removed_override = False
+
+    if isinstance(aliases, dict):
+        for key in sorted(RETIRED_ALIASES):
+            value = aliases.get(key)
+            if key not in aliases:
+                notes.append(f"alias {key}: already absent")
+            elif not (isinstance(value, str) and value.startswith(CODEX_PREFIX)):
+                notes.append(f"alias {key}: kept, it now points at {value!r}")
+            else:
+                # Recompute the span for each removal: removing a line shifts
+                # every later index.
+                span = find_child(lines, "model:", "aliases:")
+                if span is None:
+                    warnings.append(f"alias {key}: the model.aliases block was not found, so it is still live")
+                    continue
+                lines, ok = remove_key_lines(lines, span, key)
+                if ok:
+                    removed_aliases.add(key)
+                    notes.append(f"alias {key}: removed")
+                else:
+                    warnings.append(f"alias {key}: its line was not found, so it is still live")
+    else:
+        notes.append("aliases: no mapping to prune")
+
+    if isinstance(overrides, dict):
+        if RETIRED_OVERRIDE_KEY not in overrides:
+            notes.append(f"override {RETIRED_OVERRIDE_KEY}: already absent")
+        else:
+            span = find_child(lines, "agent:", "reasoning_overrides:")
+            if span is None:
+                warnings.append(f"override {RETIRED_OVERRIDE_KEY}: the agent.reasoning_overrides block was not found, so it is still live")
+            else:
+                lines, ok = remove_key_lines(lines, span, RETIRED_OVERRIDE_KEY)
+                if ok:
+                    removed_override = True
+                    notes.append(f"override {RETIRED_OVERRIDE_KEY}: removed")
+                else:
+                    warnings.append(f"override {RETIRED_OVERRIDE_KEY}: its line was not found, so it is still live")
+    else:
+        notes.append("reasoning_overrides: no mapping to prune")
+
+    for note in notes:
+        print(f"hermes-prune-codex-aliases: {note}")
+    for warning in warnings:
+        print(f"hermes-prune-codex-aliases: WARNING {warning}")
+
+    if not removed_aliases and not removed_override:
+        return 0
+
+    updated = "".join(lines)
+    try:
+        after = yaml.safe_load(updated)
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: edit would not parse, skipped ({exc.__class__.__name__})")
+        return 0
+    if not isinstance(after, dict):
+        print("hermes-prune-codex-aliases: edit is not a mapping, skipped")
+        return 0
+
+    # Prove the edit did exactly what was intended: the whole document must
+    # match the original with only the retired entries removed.
+    expected = copy.deepcopy(before)
+    exp_model = expected.get("model")
+    if isinstance(exp_model, dict) and isinstance(exp_model.get("aliases"), dict):
+        for key in removed_aliases:
+            exp_model["aliases"].pop(key, None)
+    exp_agent = expected.get("agent")
+    if isinstance(exp_agent, dict) and isinstance(exp_agent.get("reasoning_overrides"), dict) and removed_override:
+        exp_agent["reasoning_overrides"].pop(RETIRED_OVERRIDE_KEY, None)
+    if after != expected:
+        print("hermes-prune-codex-aliases: edit would change more than the retired entries, skipped")
+        return 0
+
+    # Re-read to be sure the file did not change under us since we parsed it.
+    try:
+        if path.read_text(encoding="utf-8-sig") != original:
+            print("hermes-prune-codex-aliases: config changed during the prune, skipped")
+            return 0
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: unreadable config, skipped ({exc.__class__.__name__})")
+        return 0
+
+    # Write atomically, carrying the original owner and mode onto the new file.
+    try:
+        st = path.stat()
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: could not stage a new file, skipped ({exc.__class__.__name__})")
+        return 0
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+        os.chown(tmp_name, st.st_uid, st.st_gid)
+        os.chmod(tmp_name, st.st_mode & 0o7777)
+        os.replace(tmp_name, path)
+        # The new file must carry a current timestamp so a watcher keyed on
+        # mtime notices the change.
+        os.utime(path, None)
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: write failed, skipped ({exc.__class__.__name__})")
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        return 0
+
+    # Assert the end state on the file that is now in place. A prune that did
+    # not take effect must say so loudly instead of logging a success.
+    try:
+        final = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:
+        print(f"hermes-prune-codex-aliases: WARNING could not re-read the config to verify ({exc.__class__.__name__})")
+        return 0
+    still_present = []
+    final_model = final.get("model") if isinstance(final, dict) else None
+    final_aliases = final_model.get("aliases") if isinstance(final_model, dict) else None
+    final_agent = final.get("agent") if isinstance(final, dict) else None
+    final_overrides = final_agent.get("reasoning_overrides") if isinstance(final_agent, dict) else None
+    # Any Codex-bound retired alias still present is a leftover. Repointed
+    # aliases are intentionally preserved and are not reported as failures.
+    for key in sorted(RETIRED_ALIASES):
+        value = final_aliases.get(key) if isinstance(final_aliases, dict) else None
+        if isinstance(value, str) and value.startswith(CODEX_PREFIX):
+            still_present.append(f"alias {key}")
+    # The override key names a retired model, so any surviving occurrence is a
+    # leftover whether or not this run believed it removed one, and wherever
+    # in the document it sits.
+    for where in find_key_anywhere(final, RETIRED_OVERRIDE_KEY):
+        still_present.append(f"override {RETIRED_OVERRIDE_KEY} at {where}")
+    if still_present:
+        joined = ", ".join(still_present)
+        print(f"hermes-prune-codex-aliases: WARNING retired entries are still present: {joined}")
+        return 0
+
+    print("hermes-prune-codex-aliases: retired entries removed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+' "$hermes_cfg" || echo "hermes-prune-codex-aliases: warning, step failed (non-fatal)" >&2
+      fi
+    '';
+  };
+
   system.activationScripts.hermes-control-dir-mode = {
     deps = [ "hermes-agent-setup" ];
     text = ''
