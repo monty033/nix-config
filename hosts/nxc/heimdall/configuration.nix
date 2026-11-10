@@ -34,28 +34,25 @@
 
   services.openssh.enable = true;
 
-  # ---------------------------------------------------------------------------
-  # Secrets and port openings arrive with the service step, not before.
-  #
-  # Declaring a secret that is absent from the encrypted file breaks the build:
-  # the sops manifest check rejects a missing key before activation, and
-  # installation would reject it again at runtime. The block below therefore
-  # stays commented until the values exist:
-  #
-  #   switch-192-168-86-2-password   (already in secrets.yaml — switches)
-  #   switch-192-168-86-4-password
-  #   switch-192-168-86-6-password
-  #   switch-192-168-86-3-password
-  #   switch-192-168-86-5-password
-  #   opnsense-console-api           (P4, to be added)
-  #   omada-console-openapi          (P2, to be added)
-  #   proxmox-console-token          (P3, to be added)
-  #
-  # Each is expected as: { mode = "0400"; owner = "root"; group = "root"; }
+  # Secrets for the console. Every name must exist as a top-level key in
+  # secrets/secrets.yaml, or the sops manifest check fails the build. All eight
+  # are present on master. They are root-owned, mode 0400, so root can read
+  # them. The console service receives them through LoadCredential when it lands.
+  sops.secrets = {
+    "switch-192-168-86-2-password" = { owner = "root"; group = "root"; mode = "0400"; };
+    "switch-192-168-86-3-password" = { owner = "root"; group = "root"; mode = "0400"; };
+    "switch-192-168-86-4-password" = { owner = "root"; group = "root"; mode = "0400"; };
+    "switch-192-168-86-5-password" = { owner = "root"; group = "root"; mode = "0400"; };
+    "switch-192-168-86-6-password" = { owner = "root"; group = "root"; mode = "0400"; };
+    "opnsense-console-api" = { owner = "root"; group = "root"; mode = "0400"; };
+    "omada-console-openapi" = { owner = "root"; group = "root"; mode = "0400"; };
+    "proxmox-console-token" = { owner = "root"; group = "root"; mode = "0400"; };
+  };
+
+  # Port openings arrive with the service step, not before.
   #
   # networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9140 ];
   # LAN access to 9140 is source-filtered to 192.168.86.0/24 when the service
   # lands, because guest (192.168.20.0/24) and IoT (192.168.10.0/24) clients can
   # otherwise reach it by routing.
-  # ---------------------------------------------------------------------------
 }
