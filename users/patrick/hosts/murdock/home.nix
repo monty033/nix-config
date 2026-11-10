@@ -83,8 +83,29 @@ in
 
   services.flatpak.enable = true;
 
+  # Declaring `remotes` replaces the module's flathub default, so flathub has to be
+  # listed explicitly or Notesnook loses its origin. The Kyllene remote points at the
+  # published .flatpakrepo, which carries the repo's GPG key inline — no separate
+  # gpg-import needed. Key fingerprint 91339D076D09F4C359CD676740144D773675CED0.
+  services.flatpak.remotes = [
+    {
+      name = "flathub";
+      location = "https://dl.flathub.org/repo/flathub.flatpakrepo";
+    }
+    {
+      name = "kyllene";
+      location = "https://kyllene.app/kyllene.flatpakrepo";
+    }
+  ];
+
   services.flatpak.packages = [
     "com.notesnook.Notesnook"
+    # Auto-updating (Patrick's choice): no `commit` pin, so the daily update job
+    # picks up new Kyllene releases along with everything else.
+    {
+      appId = "app.kyllene.Kyllene";
+      origin = "kyllene";
+    }
   ];
 
   services.flatpak.update.auto = {
