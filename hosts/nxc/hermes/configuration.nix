@@ -484,6 +484,11 @@ in
       # look like a no-op until an unrelated change restarted the unit.
       (builtins.toJSON config.services.hermes-agent.settings.model)
       (builtins.toJSON config.services.hermes-agent.settings.delegation)
+      # Auxiliary lanes and the fallback chain are settings blocks of their own,
+      # so a change to either must restart the unit, exactly as a change to the
+      # model or delegation blocks does.
+      (builtins.toJSON config.services.hermes-agent.settings.auxiliary)
+      (builtins.toJSON config.services.hermes-agent.settings.fallback_providers)
     ]
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
@@ -852,18 +857,19 @@ in
         idle_minutes = 2880;
       };
 
-      # Fallbacks are availability routes, not quality routing. The default
-      # route runs on a different provider, so these entries are the two
-      # independent backups: Sonnet on the subscription provider, then Codex
-      # (GPT-6 Luna) on its own, so an outage of either leaves one route open.
+      # Fallbacks are availability routes, not quality routing. Each entry is a
+      # separate transport, so one failing leaves the others open: minimax
+      # first (it also carries the auxiliary lanes), then Haiku on the
+      # subscription provider.
       fallback_providers = [
-        { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
-        { provider = "openai-codex"; model = "gpt-6-luna"; }
+        { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
+        { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
       ];
 
-      # Mixture of Agents presets. Keep two explicit cross-provider choices:
-      #   - standard (default): Haiku + Luna advise a Sol aggregator.
-      #   - max: Sol + Sonnet advise an Opus aggregator for deliberate,
+      # Mixture of Agents presets. Each keeps two reference models and one
+      # aggregator, drawn from the Claude subscription, MiniMax and OpenCode Go:
+      #   - standard (default): Haiku + MiniMax M3.1 advise a DeepSeek aggregator.
+      #   - max: DeepSeek + Sonnet advise an Opus aggregator for deliberate,
       #     expensive one-shot work.
       # Retired presets remain explicitly disabled because the NixOS module
       # deep-merges settings into mutable config.yaml and omitted keys survive.
@@ -875,11 +881,11 @@ in
         presets.standard = {
           reference_models = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
-            { provider = "openai-codex"; model = "gpt-6-luna"; }
+            { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
           ];
           aggregator = {
-            provider = "openai-codex";
-            model = "gpt-6.1-sol";
+            provider = "opencode-go";
+            model = "deepseek-v4.1-flash";
           };
           max_tokens = 4096;
           reference_max_tokens = 600;
@@ -887,7 +893,7 @@ in
         };
         presets.max = {
           reference_models = [
-            { provider = "openai-codex"; model = "gpt-6.1-sol"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
           aggregator = {
@@ -903,16 +909,16 @@ in
         presets.lite.enabled = false;
       };
 
-      # Auxiliary task assignments. Luna handles inexpensive background work;
-      # Claude provides a separate-provider fallback. Reasoning is task-level
-      # and applies uniformly to every fallback candidate.
+      # Auxiliary task assignments. minimax carries the background work; every
+      # lane here declares its own cross-provider fallback chain. Reasoning is
+      # task-level and applies uniformly to every fallback candidate.
       auxiliary = {
-        provider = "openai-codex";
-        model = "gpt-6-luna";
+        provider = "minimax";
+        model = "MiniMax-M3.1-Flash";
 
         web_extract = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
@@ -920,8 +926,8 @@ in
         };
 
         compression = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
@@ -929,8 +935,8 @@ in
         };
 
         skills_hub = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
@@ -938,8 +944,8 @@ in
         };
 
         mcp = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "medium";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
@@ -947,8 +953,8 @@ in
         };
 
         approval = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
@@ -956,8 +962,8 @@ in
         };
 
         title_generation = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
@@ -965,31 +971,31 @@ in
         };
 
         triage_specifier = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "medium";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
         };
 
-        # Luna is the verified vision-capable Codex route. Claude Sonnet is a
-        # separate-provider fallback and must pass the post-deploy image smoke.
+        # minimax carries vision. Both this route and the Sonnet fallback must
+        # pass the post-deploy image smoke.
         vision = {
-          provider = "openai-codex";
-          model = "gpt-6-luna";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
           ];
         };
 
-        # /review launches a full reviewer subagent. Sol at xhigh is strictly
-        # more deliberate than the Luna/high parent; Claude Opus provides the
+        # /review launches a full reviewer subagent. The reasoning effort is
+        # unchanged from the previous reviewer route; the Opus entry is the
         # cross-provider availability fallback.
         review = {
-          provider = "openai-codex";
-          model = "gpt-6.1-sol";
+          provider = "minimax";
+          model = "MiniMax-M3.1-Flash";
           reasoning_effort = "xhigh";
           fallback_chain = [
             { provider = "claude-subscription-directsdk-experimental"; model = "claude-opus-5-5[1m]"; }
@@ -1234,15 +1240,15 @@ in
       };
 
       platforms = {
-        # Voice Assistant endpoint. Keep the latency-sensitive route on Luna
+        # Voice Assistant endpoint. Keep the latency-sensitive route on Haiku
         # without changing the configured default route for other clients.
         api_server = {
           enabled = true;
           extra = {
             model_name = "hermes-agent";
             model_routes.bernie-voice = {
-              provider = "openai-codex";
-              model = "gpt-6-luna";
+              provider = "claude-subscription-directsdk-experimental";
+              model = "claude-haiku-5-5";
             };
           };
         };
