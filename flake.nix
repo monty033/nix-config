@@ -33,7 +33,11 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to NookBridge main at 23b9312. A preserved block may carry an
+    # Pinned to the merge of NookBridge #298 (eea2fa0). The operator census
+    # reports serializer refusals by closed code, and how many of those notes
+    # kept preserved blocks. No write path changes.
+    #
+    # Previous pin 23b9312: A preserved block may carry an
     # optional readable `text` rendered from its own bytes by the read-only
     # renderer, bounded per block and per document, and bound to the preimage
     # (NookBridge #297).
@@ -213,7 +217,7 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=23b931265ed34916e72d8386a7722fc118776610";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=eea2fa0a74364b0e313d3b39c0225ebde2f3dbac";
       flake = false;
     };
 
