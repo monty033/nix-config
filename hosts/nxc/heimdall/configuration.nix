@@ -158,6 +158,7 @@ in
   # This host filters with iptables, so the rules are written for that backend;
   # NixOS offers no output chain of its own, hence extraCommands.
   networking.firewall.extraCommands = ''
+    iptables -I nixos-fw 1 -s 192.168.86.0/24 -p tcp --dport 9140 -j nixos-fw-accept
     iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -p tcp --sport 9140 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 127.0.0.0/8 -j ACCEPT
     iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -j ACCEPT
@@ -166,7 +167,4 @@ in
   '';
 
   networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9140 ];
-  networking.firewall.extraInputRules = ''
-    -s 192.168.86.0/24 -p tcp --dport 9140 -j nixos-fw-accept
-  '';
 }
