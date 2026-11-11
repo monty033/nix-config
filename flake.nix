@@ -33,10 +33,19 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to the merge of NookBridge #299 (1ab220c). The operator census
-    # reports serializer refusals by closed processing stage: validation,
-    # reference checking, Markdown emission, round-trip, or unclassified. No
-    # write path changes.
+    # Pinned to the merge of NookBridge #300 (654305e). A note is no longer
+    # refused whole because one block has no Markdown spelling: the codec is
+    # asked block by block, and only the block it cannot spell is preserved
+    # byte for byte while the rest of the note stays editable. Validation and
+    # reference-check refusals still fail the note, size and depth limits stay
+    # the decoder's own bound, hostile markup is never preserved, and a throw
+    # the codec did not classify fails closed. Empty paragraphs, callouts and
+    # blockquotes gained explicit Markdown spellings so they round-trip instead
+    # of being demoted.
+    #
+    # Earlier pin 1ab220c: The operator census reports serializer refusals by
+    # closed processing stage: validation, reference checking, Markdown
+    # emission, round-trip, or unclassified. No write path changes.
     #
     # Earlier pin eea2fa0: The operator census reports serializer refusals by
     # closed code, and how many of those notes kept preserved blocks. No write
@@ -222,7 +231,7 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=1ab220c5b2dd9614f8c13e174c7e5632e31ac719";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=654305e9eed472975ec27c73d65dbd934a61738b";
       flake = false;
     };
 
