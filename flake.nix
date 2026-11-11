@@ -235,6 +235,14 @@
       flake = false;
     };
 
+    # Heimdall — the read-only switch console. Pinned to a reviewed commit: this
+    # is the only thing on the network permitted to read switch state, so what
+    # runs is exactly what was reviewed, not whatever main happens to be.
+    heimdall = {
+      url = "git+https://git.montycasa.net/patrick/heimdall?rev=baf08704b8e208a5fe39869edd3ba948f281bc10";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     nix-hermes-agent = {
       url = "github:NousResearch/hermes-agent/v0.23.0";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
