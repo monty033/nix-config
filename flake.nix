@@ -33,11 +33,16 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to the merge of NookBridge #298 (eea2fa0). The operator census
-    # reports serializer refusals by closed code, and how many of those notes
-    # kept preserved blocks. No write path changes.
+    # Pinned to the merge of NookBridge #299 (1ab220c). The operator census
+    # reports serializer refusals by closed processing stage: validation,
+    # reference checking, Markdown emission, round-trip, or unclassified. No
+    # write path changes.
     #
-    # Previous pin 23b9312: A preserved block may carry an
+    # Earlier pin eea2fa0: The operator census reports serializer refusals by
+    # closed code, and how many of those notes kept preserved blocks. No write
+    # path changes.
+    #
+    # Earlier pin 23b9312: A preserved block may carry an
     # optional readable `text` rendered from its own bytes by the read-only
     # renderer, bounded per block and per document, and bound to the preimage
     # (NookBridge #297).
@@ -217,7 +222,7 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=eea2fa0a74364b0e313d3b39c0225ebde2f3dbac";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=1ab220c5b2dd9614f8c13e174c7e5632e31ac719";
       flake = false;
     };
 
