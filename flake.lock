@@ -41,6 +41,27 @@
         "type": "github"
       }
     },
+    "heimdall": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794410949,
+        "narHash": "sha256-Fg25dEeiDLusNsiRkBl26kQt5LUZxAtnOI3kb0lpRy0=",
+        "ref": "refs/heads/main",
+        "rev": "baf08704b8e208a5fe39869edd3ba948f281bc10",
+        "revCount": 3,
+        "type": "git",
+        "url": "https://git.montycasa.net/patrick/heimdall"
+      },
+      "original": {
+        "rev": "baf08704b8e208a5fe39869edd3ba948f281bc10",
+        "type": "git",
+        "url": "https://git.montycasa.net/patrick/heimdall"
+      }
+    },
     "hermes-webui": {
       "inputs": {
         "nixpkgs": [
@@ -308,6 +329,7 @@
     "root": {
       "inputs": {
         "disko": "disko",
+        "heimdall": "heimdall",
         "hermes-webui": "hermes-webui",
         "home-manager": "home-manager",
         "nix-flatpak": "nix-flatpak",
