@@ -86,9 +86,9 @@ in
   systemd.services.heimdall = {
     description = "Heimdall read-only switch console";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "sops-install-secrets.service" "nftables.service" ];
+    after = [ "network-online.target" "sops-install-secrets.service" "firewall.service" ];
     wants = [ "network-online.target" ];
-    requires = [ "sops-install-secrets.service" "nftables.service" ];
+    requires = [ "sops-install-secrets.service" "firewall.service" ];
     # A failed poll is handled inside the process, so a restart means a real
     # fault. The interval is widened past RestartSec times the burst so that
     # such a fault stops the unit visibly instead of looping forever.
@@ -151,32 +151,19 @@ in
   # Keyed on this service's own user, so nothing else on the host is affected.
   # The uid is fixed above for that reason: any account that later lands on it
   # inherits the restriction, which is why this host runs nothing else.
-  networking.nftables.tables.heimdall-egress = {
-    family = "inet";
-    content = ''
-      chain output {
-        type filter hook output priority -10; policy accept;
-        # Replies to requests this service is serving, identified by the port
-        # they come from. An already-open flow to any other peer still falls
-        # through to the rules below.
-        ct state established,related tcp sport 9140 accept
-        # Loopback, which this service uses for its own startup checks.
-        meta skuid ${toString heimdallUid} ip daddr 127.0.0.0/8 accept
-        # Everything this user originates is confined to the one switch, in
-        # both families. The IPv6 rule matters: dropping AF_INET6 from the
-        # unit's address families is not enough on its own, because the socket
-        # could be created by any other means.
-        meta skuid ${toString heimdallUid} meta nfproto ipv6 drop
-        # The switch address is the only destination allowed; a future change
-        # that needs the resolver or a hostname will fail here by design.
-        meta skuid ${toString heimdallUid} ip daddr != 192.168.86.2 drop
-      }
-    '';
-  };
+  #
+  # This host filters with iptables, so the rules are written for that backend;
+  # NixOS offers no output chain of its own, hence extraCommands.
+  networking.firewall.extraCommands = ''
+    iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -p tcp --sport 9140 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 127.0.0.0/8 -j ACCEPT
+    iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -j ACCEPT
+    iptables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
+    ip6tables -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
+  '';
 
   networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9140 ];
   networking.firewall.extraInputRules = ''
-    ip saddr != { 192.168.86.0/24, 100.64.0.0/10 } tcp dport 9140 drop
-    ip saddr 192.168.86.0/24 tcp dport 9140 accept
+    -s 192.168.86.0/24 -p tcp --dport 9140 -j nixos-fw-accept
   '';
 }
