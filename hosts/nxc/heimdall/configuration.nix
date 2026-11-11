@@ -7,10 +7,9 @@
 
   # Heimdall — read-only Sodola switch console.
   #
-  # Phase 1 base host only: networking, tailnet, SSH. The console service is
-  # deliberately NOT declared here yet. It is added in its own step once the
-  # application repository exists and has been reviewed, so that an unfinished
-  # service can never fail activation on a host created ahead of it.
+  # Phase 1 reads one switch and serves it on 9140. The service is pinned to a
+  # reviewed commit of the application repository and runs unprivileged with no
+  # ability to reach anything except the switch it reads.
   #
   # Address: 192.168.86.140/24, gateway 192.168.86.1 (assigned by nxc-gen at
   # creation time; there is no network config in this file by design).
@@ -49,10 +48,90 @@
     "proxmox-console-token" = { owner = "root"; group = "root"; mode = "0400"; };
   };
 
-  # Port openings arrive with the service step, not before.
-  #
-  # networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9140 ];
-  # LAN access to 9140 is source-filtered to 192.168.86.0/24 when the service
-  # lands, because guest (192.168.20.0/24) and IoT (192.168.10.0/24) clients can
-  # otherwise reach it by routing.
+  # The console's whole configuration. Kept here rather than in the public
+  # repository, because it names the site's switch, its management address and
+  # the credential to read it with.
+  environment.etc."heimdall/config.json".text = builtins.toJSON {
+    listen = { host = "0.0.0.0"; port = 9140; };
+    poll_seconds = 60;
+    switches = [
+      {
+        name = "core";
+        family = "hydra";
+        host = "192.168.86.2";
+        port = 80;
+        scheme = "http";
+        username = "admin";
+        credential = "switch-192-168-86-2-password";
+      }
+    ];
+  };
+
+  users.users.heimdall = {
+    isSystemUser = true;
+    group = "heimdall";
+  };
+  users.groups.heimdall = { };
+
+  systemd.services.heimdall = {
+    description = "Heimdall read-only switch console";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    # The switch is on plain HTTP and the login is a client-bound session, so a
+    # failed poll is retried rather than treated as fatal.
+    startLimitIntervalSec = 0;
+    serviceConfig = {
+      Type = "simple";
+      # The credential file lands in this directory, which the console reads by
+      # name. Values never appear in the unit, the config or the environment.
+      LoadCredential = [ "switch-192-168-86-2-password:/run/secrets/switch-192-168-86-2-password" ];
+      ExecStart = "${inputs.heimdall.packages.${pkgs.system}.default}/bin/heimdall /etc/heimdall/config.json";
+      User = "heimdall";
+      Group = "heimdall";
+      Restart = "always";
+      RestartSec = 10;
+      StateDirectory = "heimdall";
+      # Reading switch state needs nothing else.
+      CapabilityBoundingSet = "";
+      AmbientCapabilities = "";
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      PrivateDevices = true;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ProtectKernelTunables = true;
+      ProtectKernelModules = true;
+      ProtectControlGroups = true;
+      ProtectClock = true;
+      ProtectHostname = true;
+      RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+      RestrictNamespaces = true;
+      RestrictRealtime = true;
+      RestrictSUIDSGID = true;
+      LockPersonality = true;
+      MemoryDenyWriteExecute = true;
+      SystemCallArchitectures = "native";
+      SystemCallFilter = [ "@system-service" "~@privileged" "~@resources" ];
+      # Plain HTTP to five switch addresses and nothing else, ever. This is the
+      # mitigation for the switches having no TLS: the console cannot be talked
+      # into reaching any other host even if it is compromised.
+      IPAddressDeny = "any";
+      IPAddressAllow = [
+        "192.168.86.2/32"
+        "127.0.0.1/32"
+        "192.168.86.0/24"
+        "100.64.0.0/10"
+      ];
+    };
+  };
+
+  # Reachable over the tailnet, and from the LAN itself. Guest (192.168.20.0/24)
+  # and IoT (192.168.10.0/24) clients can route to this address, so the source
+  # is filtered explicitly instead of relying on the interface.
+  networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9140 ];
+  networking.firewall.extraInputRules = ''
+    ip saddr != { 192.168.86.0/24, 100.64.0.0/10 } tcp dport 9140 drop
+    iifname "eth0" ip saddr 192.168.86.0/24 tcp dport 9140 accept
+  '';
 }
