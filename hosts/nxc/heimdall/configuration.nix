@@ -86,12 +86,13 @@ in
   systemd.services.heimdall = {
     description = "Heimdall read-only switch console";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "sops-install-secrets.service" ];
+    after = [ "network-online.target" "sops-install-secrets.service" "nftables.service" ];
     wants = [ "network-online.target" ];
-    requires = [ "sops-install-secrets.service" ];
+    requires = [ "sops-install-secrets.service" "nftables.service" ];
     # A failed poll is handled inside the process, so a restart means a real
-    # fault. The default start limit is left in place so that fault stops the
-    # unit visibly instead of looping every ten seconds.
+    # fault. The interval is widened past RestartSec times the burst so that
+    # such a fault stops the unit visibly instead of looping forever.
+    startLimitIntervalSec = 60;
     serviceConfig = {
       Type = "simple";
       # The credential file lands in this directory, which the console reads by
@@ -159,13 +160,15 @@ in
         # they come from. An already-open flow to any other peer still falls
         # through to the rules below.
         ct state established,related tcp sport 9140 accept
-        # Loopback only, for the service's own startup checks.
+        # Loopback, which this service uses for its own startup checks.
         meta skuid ${toString heimdallUid} ip daddr 127.0.0.0/8 accept
         # Everything this user originates is confined to the one switch, in
         # both families. The IPv6 rule matters: dropping AF_INET6 from the
         # unit's address families is not enough on its own, because the socket
         # could be created by any other means.
         meta skuid ${toString heimdallUid} meta nfproto ipv6 drop
+        # The switch address is the only destination allowed; a future change
+        # that needs the resolver or a hostname will fail here by design.
         meta skuid ${toString heimdallUid} ip daddr != 192.168.86.2 drop
       }
     '';
