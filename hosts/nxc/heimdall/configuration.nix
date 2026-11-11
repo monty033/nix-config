@@ -86,9 +86,12 @@ in
   systemd.services.heimdall = {
     description = "Heimdall read-only switch console";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "sops-install-secrets.service" "firewall.service" ];
+    after = [ "network-online.target" "firewall.service" ];
     wants = [ "network-online.target" ];
-    requires = [ "sops-install-secrets.service" "firewall.service" ];
+    requires = [ "firewall.service" ];
+    # Secrets are written during activation on this host, not by a unit, so
+    # there is nothing to order against for them; the only hard dependency is
+    # the firewall, which carries both the accept and the egress restriction.
     # A failed poll is handled inside the process, so a restart means a real
     # fault. The interval is widened past RestartSec times the burst so that
     # such a fault stops the unit visibly instead of looping forever.
