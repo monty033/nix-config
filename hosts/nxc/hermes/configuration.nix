@@ -751,8 +751,7 @@ in
       heraldPushHermesPlugin
       # Claude Pro/Max via the official Claude Code CLI. The default
       # conversation route runs on the reseller gateway, so this plugin supplies
-      # the delegation route (Haiku), the subscription fallback route, and the
-      # Claude aliases.
+      # the subscription fallback route and the Claude aliases.
       claudeSubscriptionDirectsdkPlugin
       # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
       # the recipient allowlist comes from the hermes-proton-env sops secret
@@ -790,7 +789,7 @@ in
       # interchangeable across routes. No per-model compaction override is
       # declared (see compression below), so it uses the global 300k cap like
       # other models — deliberately short of its 1M window. Delegation runs
-      # Haiku (below).
+      # MiniMax M3.1 (below).
       model = {
         default = "deepseek-v4.1-flash";
         provider = "opencode-go";
@@ -817,7 +816,7 @@ in
       };
 
       # Native delegate_task controls (Bernie's delegation path).
-      # Workers run Haiku on the subscription provider, a different provider from
+      # Workers run MiniMax M3.1 on the MiniMax route, a different provider from
       # the conversation default; no delegation fallback is configured, so an
       # outage there stops worker calls even when the main route has fallbacks.
       # `reasoning_effort` replaces the inherited session effort for each child
@@ -825,8 +824,8 @@ in
       # override below — decides worker effort.
       # Serial concurrency and depth 1 keep this pilot bounded and leaf-only.
       delegation = {
-        provider = "claude-subscription-directsdk-experimental";
-        model = "claude-haiku-5-5";
+        provider = "minimax";
+        model = "MiniMax-M3.1-Flash";
         reasoning_effort = "medium";
         max_concurrent_children = 1;
         max_spawn_depth = 1;
