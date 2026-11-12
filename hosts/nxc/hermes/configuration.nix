@@ -863,12 +863,17 @@ in
       };
 
       # Fallbacks are availability routes, not quality routing. Each entry is a
-      # separate transport, so one failing leaves the others open: minimax
-      # first (it also carries the auxiliary lanes), then Haiku on the
-      # subscription provider.
+      # separate transport, so one failing leaves the others open. The first
+      # entry is DeepSeek V4.1 Flash through the OpenCode Go gateway — the same
+      # weights as the default, on a different transport, so a DeepSeek API
+      # outage degrades to the reseller rather than leaving the family. Then
+      # Haiku on the subscription provider, then MiniMax M3.1, which also
+      # carries the auxiliary lanes. The gateway id for DeepSeek V4.1 Flash is
+      # `deepseek-v4.1-flash`, not the platform API's `deepseek-flash`.
       fallback_providers = [
-        { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
+        { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
+        { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
       ];
 
       # Mixture of Agents presets. Each keeps two reference models and one
