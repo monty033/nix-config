@@ -48,16 +48,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1794450005,
-        "narHash": "sha256-QBT4OgeZxBkOUpQYETxX8lA4R2uM5UdAsSX6Ze+akSA=",
+        "lastModified": 1794450794,
+        "narHash": "sha256-4gKcQ7MHkifKYP876L7T3tPLG56Y5x3r2mIWnPT1v/A=",
         "ref": "refs/heads/main",
-        "rev": "3a08d63abda96293675749178d14f036eb257765",
-        "revCount": 4,
+        "rev": "f293546ad0d616c92a40c9a128be47aec9c7b239",
+        "revCount": 5,
         "type": "git",
         "url": "https://git.montycasa.net/patrick/heimdall"
       },
       "original": {
-        "rev": "3a08d63abda96293675749178d14f036eb257765",
+        "rev": "f293546ad0d616c92a40c9a128be47aec9c7b239",
         "type": "git",
         "url": "https://git.montycasa.net/patrick/heimdall"
       }
