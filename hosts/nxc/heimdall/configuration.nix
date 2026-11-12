@@ -59,20 +59,19 @@ in
     listen = { host = "0.0.0.0"; port = 9140; };
     poll_seconds = 60;
     switches = [
-      {
-        name = "core";
-        family = "hydra";
-        host = "192.168.86.2";
-        port = 80;
-        # The login RSA-encrypts the password against a modulus the device
-        # serves first, so a passive capture does not yield it. The modulus is
-        # fetched over the same unauthenticated channel, so an active man in
-        # the middle on the site LAN can still recover it. A read-only switch
-        # account is the real mitigation and is not yet in place.
-        scheme = "http";
-        username = "admin";
-        credential = "switch-192-168-86-2-password";
-      }
+      # The aggregate switch RSA-encrypts the password against a modulus the
+      # device serves first, so a passive capture does not yield it. The older
+      # units send it under an unauthenticated MD5 challenge instead. Neither
+      # protects against an active attacker on the site LAN, so a read-only
+      # switch account is the real mitigation and is not yet in place.
+      { name = "AGG-10G"; family = "hydra"; host = "192.168.86.2"; port = 80;
+        scheme = "http"; username = "admin"; credential = "switch-192-168-86-2-password"; }
+      { name = "WORKSHOP"; family = "legacy"; host = "192.168.86.3"; port = 80;
+        scheme = "http"; username = "admin"; credential = "switch-192-168-86-3-password"; }
+      { name = "LIVING"; family = "legacy"; host = "192.168.86.4"; port = 80;
+        scheme = "http"; username = "admin"; credential = "switch-192-168-86-4-password"; }
+      { name = "OFFICE-2.5G"; family = "legacy"; host = "192.168.86.6"; port = 80;
+        scheme = "http"; username = "admin"; credential = "switch-192-168-86-6-password"; }
     ];
   };
 
@@ -100,7 +99,12 @@ in
       Type = "simple";
       # The credential file lands in this directory, which the console reads by
       # name. Values never appear in the unit, the config or the environment.
-      LoadCredential = [ "switch-192-168-86-2-password:/run/secrets/switch-192-168-86-2-password" ];
+      LoadCredential = [
+        "switch-192-168-86-2-password:/run/secrets/switch-192-168-86-2-password"
+        "switch-192-168-86-3-password:/run/secrets/switch-192-168-86-3-password"
+        "switch-192-168-86-4-password:/run/secrets/switch-192-168-86-4-password"
+        "switch-192-168-86-6-password:/run/secrets/switch-192-168-86-6-password"
+      ];
       ExecStart = "${inputs.heimdall.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/heimdall /etc/heimdall/config.json";
       User = "heimdall";
       Group = "heimdall";
@@ -137,10 +141,12 @@ in
       # output rule below, keyed on this service's user, which holds everywhere.
       IPAddressDeny = "any";
       IPAddressAllow = [
-        "192.168.86.2/32"
         "127.0.0.1/32"
-        "192.168.86.0/24"
         "100.64.0.0/10"
+        "192.168.86.2/32"
+        "192.168.86.3/32"
+        "192.168.86.4/32"
+        "192.168.86.6/32"
       ];
     };
   };
@@ -158,17 +164,32 @@ in
   # This host filters with iptables, so the rules are written for that backend;
   # NixOS offers no output chain of its own, hence extraCommands.
   networking.firewall.extraCommands = ''
+    # Order matters. Every rule is deleted first so a reload cannot accumulate
+    # duplicates, then the DROP goes in before any ACCEPT: if activation dies
+    # half way, the service is over-restricted rather than unconfined. The
+    # accepts are then inserted above the DROP, so there is never a moment
+    # where this uid has no output restriction at all.
     ip46tables -w -D INPUT -s 192.168.86.0/24 -p tcp --dport 9140 -j nixos-fw-accept 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -p tcp --sport 9140 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 127.0.0.0/8 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.3 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.4 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.6 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.3 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.4 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.6 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP 2>/dev/null || true
     iptables -w -I nixos-fw 1 -s 192.168.86.0/24 -p tcp --dport 9140 -j nixos-fw-accept
-    iptables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -p tcp --sport 9140 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    iptables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 127.0.0.0/8 -j ACCEPT
-    iptables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -j ACCEPT
     iptables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -p tcp --sport 9140 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 127.0.0.0/8 -j ACCEPT
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -p tcp --dport 80 -j ACCEPT
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.3 -p tcp --dport 80 -j ACCEPT
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.4 -p tcp --dport 80 -j ACCEPT
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.6 -p tcp --dport 80 -j ACCEPT
     ip6tables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
   '';
 
