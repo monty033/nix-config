@@ -757,8 +757,8 @@ in
       # hidden until a phone switches them on in Kyllene.
       heraldPushHermesPlugin
       # Claude Pro/Max via the official Claude Code CLI. The default
-      # conversation route runs on the reseller gateway, so this plugin supplies
-      # the subscription fallback route and the Claude aliases.
+      # conversation route runs on the DeepSeek platform API directly, so this
+      # plugin supplies the subscription fallback route and the Claude aliases.
       claudeSubscriptionDirectsdkPlugin
       # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
       # the recipient allowlist comes from the hermes-proton-env sops secret
@@ -788,18 +788,17 @@ in
     ];
 
     settings = {
-      # Default conversation model is DeepSeek V4.1 Flash served through the
-      # OpenCode Go gateway (provider `opencode-go`), whose ID for it is
-      # `deepseek-v4.1-flash`. The platform API serves the same model under
-      # `deepseek-flash` instead, which is why the alias below spells that
-      # provider's ID rather than this one; the two spellings are not
-      # interchangeable across routes. No per-model compaction override is
-      # declared (see compression below), so it uses the global 300k cap like
-      # other models — deliberately short of its 1M window. Delegation runs
-      # MiniMax M3.1 (below).
+      # Default conversation model is DeepSeek V4.1 Flash served directly by the
+      # DeepSeek platform API (provider `deepseek`), not through a reseller. The
+      # ID is `deepseek-flash`, which is what that provider's live /v1/models
+      # returns for this model; the reseller's `deepseek-v4.1-flash` spelling
+      # does not exist on it. No per-model compaction override is declared for
+      # it (see compression below), so it uses the global 300k cap like other
+      # models — deliberately short of its 1M window. Delegation runs MiniMax
+      # M3.1 (below).
       model = {
-        default = "deepseek-v4.1-flash";
-        provider = "opencode-go";
+        default = "deepseek-flash";
+        provider = "deepseek";
         # Reasoning effort per model lives in agent.reasoning_overrides below.
         # `model.reasoning_effort` is not a recognized key in this section's
         # schema, so it is not set here.
@@ -814,7 +813,11 @@ in
           mm = "minimax/MiniMax-M3.1-Flash";
           # The default conversation model on its default route. The `flash`
           # name keeps pointing at whatever the default route is.
-          flash = "opencode-go/deepseek-v4.1-flash";
+          flash = "deepseek/deepseek-flash";
+          # Rollback lever: the reseller route the default used before the
+          # switch to the platform API. Select with `/model ocflash`. Its ID on
+          # that provider is `deepseek-v4.1-flash`, not the direct spelling.
+          ocflash = "opencode-go/deepseek-v4.1-flash";
           # The platform API's route to the same model, kept credentialed and
           # one command away: `/model dsflash`. Its ID on that provider is
           # `deepseek-flash`, not the reseller spelling used above.
@@ -1111,7 +1114,7 @@ in
         # Per-model reasoning override. Keys are model IDs (spelling-tolerant
         # resolver in hermes_constants.resolve_per_model_reasoning_effort).
         # The default conversation model uses high, declared under both the
-        # reseller ID it is routed as and the platform-API ID the dsflash alias
+        # platform-API ID it is routed as and the reseller ID the ocflash alias
         # resolves to, so switching between those routes keeps the same effort.
         # Haiku's entry covers sessions that select Haiku directly; delegation
         # children take their effort from `delegation.reasoning_effort` above.
