@@ -23,41 +23,45 @@ DEFAULT_OUT = Path("/tmp/usage-graph.png")
 
 # Colors per provider (provider_key -> color)
 PROVIDER_COLORS = {
-    "codex": "#10b981",       # emerald (will be overridden per window)
+    # Codex is disabled in /myusage (text and graph). Kept for a possible
+    # re-enable: restore these entries and the fetch_data() filter below.
+    # "codex": "#10b981",     # emerald (will be overridden per window)
     "claude": "#f59e0b",      # orange (will be overridden per window)
-    # "minimax": "#f59e0b",     # amber
+    "minimax": "#fbbf24",     # amber (5h only; weekly is filtered out)
     "opencodeGo": "#3b82f6",  # blue (base, overridden per window below)
 }
 
 # Window overrides: (provider, window) -> (color, linestyle, marker)
 WINDOW_OVERRIDES = {
-    ("codex", "5h"):      ("#86efac", "-", "o"),      # light green, solid
-    ("codex", "weekly"):  ("#15803d", "--", "s"),     # dark green, dashed
+    # ("codex", "5h"):      ("#86efac", "-", "o"),      # light green, solid
+    # ("codex", "weekly"):  ("#15803d", "--", "s"),     # dark green, dashed
     ("claude", "5h"):     ("#fed7aa", "-", "o"),      # light orange, solid
     ("claude", "weekly"): ("#ea580c", "--", "s"),     # dark orange, dashed
     ("opencodeGo", "5h"):     ("#93c5fd", "-",  "o"),    # light blue, solid
     ("opencodeGo", "weekly"): ("#3b82f6", "--", "s"),    # medium blue, dashed
     ("opencodeGo", "monthly"):("#1e40af", ":",  "^"),    # dark blue, dotted
+    ("minimax", "5h"):    ("#fbbf24", "-",  "P"),      # amber, solid, plus marker
 }
 
-# Group by provider: codex first (5h then weekly), claude second (5h then
-# weekly), OpenCode Go last (5h, weekly, monthly) to keep clusters adjacent.
+# Group by provider, keeping each provider's windows adjacent: claude (5h then
+# weekly), OpenCode Go (5h, weekly, monthly), MiniMax (5h only). The commented
+# codex entries stay first so a re-enable restores the original cluster order.
 SERIES_ORDER = [
-    ("codex", "5h"),
-    ("codex", "weekly"),
+    # ("codex", "5h"),
+    # ("codex", "weekly"),
     ("claude", "5h"),
     ("claude", "weekly"),
     ("opencodeGo", "5h"),
     ("opencodeGo", "weekly"),
     ("opencodeGo", "monthly"),
-    # ("minimax", "5h"),
+    ("minimax", "5h"),
 ]
 
 PROVIDER_LABELS = {
-    "codex": "Codex",
+    # "codex": "Codex",
     "claude": "Claude",
     "claudePro": "Claude",  # for legacy db entries
-    # "minimax": "MiniMax",
+    "minimax": "MiniMax",
     "opencodeGo": "OpenCode Go",
 }
 
@@ -94,7 +98,9 @@ def fetch_data(conn: sqlite3.Connection, dt_from: str, dt_to: str) -> list[dict]
 
     Claude Pro only reports 5-hour and weekly subscription windows. Ignore
     legacy monthly rows written by the short-lived placeholder collector.
-    Filter out minimax data (disabled provider).
+    Filter out codex rows (provider disabled in /myusage; history is kept so a
+    re-enable plots it again) and the minimax weekly window (this account has
+    only a 5-hour limit).
     Normalize claudePro to claude for consistent display.
     """
     rows = conn.execute(
@@ -102,7 +108,8 @@ def fetch_data(conn: sqlite3.Connection, dt_from: str, dt_to: str) -> list[dict]
            FROM snapshots
            WHERE ts >= ? AND ts <= ?
              AND NOT (provider = 'claudePro' AND window = 'monthly')
-             AND NOT (provider = 'minimax')
+             AND NOT (provider = 'codex')
+             AND NOT (provider = 'minimax' AND window = 'weekly')
            ORDER BY ts ASC""",
         (dt_from, dt_to),
     ).fetchall()
