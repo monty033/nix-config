@@ -299,6 +299,13 @@ let
     export PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils pkgs.openssh pkgs.curl pkgs.util-linux ]}
     exec ${pkgs.bash}/bin/bash ${familyCalendarSource}/router.sh
   '';
+  # Spike (calendar-caldav-spike.md): mirrors the file the publisher already
+  # wrote into the throwaway CalDAV calendar. Throwaway branch, never merged
+  # as-is.
+  caldavMirror = pkgs.writeShellScriptBin "caldav-family-mirror" ''
+    export PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils ]}
+    exec ${calendarPython}/bin/python3 ${familyCalendarSource}/caldav_mirror.py "$@"
+  '';
   sportsCalendarSource = ../../../scripts/calendar-publish/philly-sports-cal;
   sportsCalendarPublisher = pkgs.writeShellScriptBin "sports-calendar-publisher" ''
     export PYTHON=${calendarPython}/bin/python3
@@ -1841,6 +1848,50 @@ if __name__ == "__main__":
       OnCalendar = "*-*-* 00/4:00:00 America/New_York";
       Persistent = true;
       Unit = "family-calendar-publish.service";
+    };
+  };
+
+  # Spike only (calendar-caldav-spike.md §2). Mirrors the file the publisher
+  # already wrote into the throwaway CalDAV calendar. No OnFailure: spike
+  # failures are read at the checkpoints, not alerted.
+  #
+  # Ordering: the path unit fires on the publisher's own write, so the mirror
+  # runs alongside the tail of a publish by design — it is a separate trigger,
+  # not a transaction member. It does wait for the agent, because the
+  # credentials come from the .env that the agent module generates.
+  systemd.services.calendar-caldav-mirror = {
+    description = "Mirror family.ics into CalDAV (spike)";
+    wants = [ "network-online.target" "hermes-agent.service" ];
+    after = [ "network-online.target" "hermes-agent.service" "sops-install-secrets.service" ];
+    environment = {
+      HOME = "/var/lib/hermes";
+      HERMES_HOME = "/var/lib/hermes/.hermes";
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      User = "hermes";
+      Group = "users";
+      WorkingDirectory = "/var/lib/hermes";
+      UMask = "0077";
+      ExecStart = "${caldavMirror}/bin/caldav-family-mirror --apply";
+      TimeoutStartSec = 300;
+    };
+  };
+
+  systemd.paths.calendar-caldav-mirror = {
+    wantedBy = [ "paths.target" ];
+    pathConfig = {
+      PathChanged = "/var/lib/hermes/.hermes/workspace/calendars/family.ics";
+      Unit = "calendar-caldav-mirror.service";
+    };
+  };
+
+  systemd.timers.calendar-caldav-mirror = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "*-*-* 00/6:20:00 America/New_York";
+      Persistent = true;
+      Unit = "calendar-caldav-mirror.service";
     };
   };
 
