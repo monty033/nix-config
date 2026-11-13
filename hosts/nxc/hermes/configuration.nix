@@ -470,20 +470,24 @@ in
     [ config.services.hermes-agent.package ]
     ++ config.services.hermes-agent.extraPlugins
     # The Hermes module merges settings into mutable config.yaml during
-    # activation. Restart when the memory, voice, MCP, webapp, or routing
-    # settings change so a provider cutover or a new listener is effective
-    # without a manual systemctl command.
+    # activation. Restart when a block that the running gateway only reads once,
+    # at startup, changes: memory, voice, toolsets, routing, auxiliary lanes,
+    # the fallback chain, plugins, quick commands, MCP, webapp, display and
+    # platform tables. Otherwise a deployment rewrites config.yaml and the live
+    # process keeps serving the values it booted with.
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.memory)
       (builtins.toJSON config.services.hermes-agent.settings.tts)
-      # Toolset enablement partly lives in settings.agent: disabled_toolsets is
-      # here. settings.toolsets and platform_toolsets are not covered by any
-      # restart trigger, so changing those still needs a manual restart of the
-      # gateway. Without this trigger the activation merge updates config.yaml
-      # while the running gateway keeps the toolset list it started with, so
-      # enabling a toolset appears to do nothing until some unrelated change
-      # restarts the service.
+      # Toolset enablement lives in three places: agent.disabled_toolsets, the
+      # top-level toolsets list, and the per-platform platform_toolsets table.
+      # All three are triggered. The gateway resolves the toolset list from the
+      # config snapshot it loads at startup, so without the last two the
+      # activation merge updates config.yaml while the running gateway keeps the
+      # list it started with, and enabling a toolset appears to do nothing until
+      # some unrelated change restarts the service.
       (builtins.toJSON config.services.hermes-agent.settings.agent)
+      (builtins.toJSON config.services.hermes-agent.settings.toolsets)
+      (builtins.toJSON config.services.hermes-agent.settings.platform_toolsets)
       # Model routes and delegation live in their own settings sections, so a
       # route change leaves the agent blob above byte-identical and no trigger
       # fires. Activation would then rewrite config.yaml while the running
@@ -496,6 +500,13 @@ in
       # model or delegation blocks does.
       (builtins.toJSON config.services.hermes-agent.settings.auxiliary)
       (builtins.toJSON config.services.hermes-agent.settings.fallback_providers)
+      # Plugin enablement and the quick-command table are read once, at gateway
+      # startup: plugin discovery caches one manager per home, and the quick
+      # commands are captured into the runner's config object, which is never
+      # reassigned. A change to either therefore only lands on a restart, so
+      # without these two it looks like the deploy did nothing.
+      (builtins.toJSON config.services.hermes-agent.settings.plugins)
+      (builtins.toJSON config.services.hermes-agent.settings.quick_commands)
     ]
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
