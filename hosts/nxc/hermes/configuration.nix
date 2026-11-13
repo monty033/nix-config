@@ -831,12 +831,16 @@ in
       # outage there stops worker calls even when the main route has fallbacks.
       # `reasoning_effort` replaces the inherited session effort for each child
       # (tools/delegate_tool_config.py), so this key — not the per-model
-      # override below — decides worker effort.
+      # override below — decides worker effort. Set deliberately at `low`
+      # rather than the route baseline: children on this model were observed
+      # over-thinking and re-entering tool loops, and a lower effort shortens
+      # the reasoning before each call. Raise it only if worker output quality
+      # drops, since this is the lever for both latency and thrash.
       # Serial concurrency and depth 1 keep this pilot bounded and leaf-only.
       delegation = {
         provider = "minimax";
         model = "MiniMax-M3.1-Flash";
-        reasoning_effort = "medium";
+        reasoning_effort = "low";
         max_concurrent_children = 1;
         max_spawn_depth = 1;
         max_iterations = 40;
