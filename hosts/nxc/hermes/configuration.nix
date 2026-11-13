@@ -1279,17 +1279,6 @@ in
             };
           };
         };
-
-        # Mattermost is retired, but this block must stay explicitly disabled until
-        # MATTERMOST_TOKEN is removed from the openclaw-env secret. Upstream treats that
-        # token as an enable credential (plugins/platforms/mattermost/gateway_env.py,
-        # ENV_ENABLE_CREDENTIALS), so deleting this block alone lets the env pass
-        # re-enable the platform with no URL, which surfaces as a broken adapter. An
-        # explicit `enabled` key sets the loader's _enabled_explicit marker, which the
-        # env pass honours and only warns about once.
-        mattermost = {
-          enabled = false;
-        };
       };
 
       terminal = {
