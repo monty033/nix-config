@@ -89,11 +89,6 @@
         upstream = "http://mealie:9000";
       };
 
-      "chat.montycasa.com" = {
-        protocol = "http";
-        upstream = "http://mattermost:8065";
-      };
-
       "auth.montycasa.com" = {
         protocol = "http";
         upstream = "http://pocket-id:1411";

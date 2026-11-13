@@ -471,12 +471,6 @@
       modules = commonModules ++ [ ./hosts/nxc/mealie ];
     };
 
-    ## Mattermost ##
-    nixosConfigurations.mattermost = nixpkgs.lib.nixosSystem {
-      specialArgs = { inherit inputs; };
-      modules = commonModules ++ [ ./hosts/nxc/mattermost ];
-    };
-
     ## ERPNext ##
     nixosConfigurations.erpnext = nixpkgs.lib.nixosSystem {
       specialArgs = { inherit inputs; };
