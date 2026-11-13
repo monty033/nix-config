@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -67,6 +68,37 @@ class ResolveTest(unittest.TestCase):
 
     def test_private_refusal_of_sole_candidate_exhausts(self):
         result = self.resolve([entry("a/free-x", "slice", 1, free=True)], {"a/free-x": ["high"]}, private=True)
+        self.assertFalse(result["ok"])
+
+    def test_spent_window_routes_when_extra_usage_is_declared(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        result = self.resolve(
+            [entry("opencode-go/one", "slice", 1, extra_usage_until="2999-01-01")],
+            {"opencode-go/one": ["high"]}, quota={"opencode-go": spent},
+        )
+        self.assertTrue(result["ok"])
+        self.assertIn("on extra usage declared until 2999-01-01", result["quota"])
+
+    def test_declared_extra_usage_does_not_rescue_a_spent_window_past_its_date(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        result = self.resolve(
+            [entry("opencode-go/one", "slice", 1, extra_usage_until="2000-01-01")],
+            {"opencode-go/one": ["high"]}, quota={"opencode-go": spent},
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["steps"][0]["cause"], "quota")
+
+    def test_malformed_declaration_does_not_route_a_spent_window(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        result = self.resolve(
+            [entry("opencode-go/one", "slice", 1, extra_usage_until="soon")],
+            {"opencode-go/one": ["high"]}, quota={"opencode-go": spent},
+        )
+        self.assertFalse(result["ok"])
+
+    def test_spent_window_without_a_declaration_stays_exhausted(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        result = self.resolve([entry("opencode-go/one", "slice", 1)], {"opencode-go/one": ["high"]}, quota={"opencode-go": spent})
         self.assertFalse(result["ok"])
 
     def test_excluded_author_model_is_skipped(self):
@@ -294,6 +326,50 @@ class QuotaTest(unittest.TestCase):
     def test_no_subscription_window(self):
         self.assertEqual(oc.quota_verdict(None), ("n/a", "quota: n/a (no subscription window)"))
 
+    def test_declared_extra_usage_covers_a_spent_window(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        verdict, text = oc.quota_verdict(spent, {"extra_usage_until": "2999-01-01"})
+        self.assertEqual(verdict, "ok")
+        self.assertIn("quota: monthly 0% left", text)
+        self.assertIn("on extra usage declared until 2999-01-01", text)
+
+    def test_declared_extra_usage_stays_valid_through_its_date(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        today = date(2026, 11, 13)
+        self.assertEqual(oc.quota_verdict(spent, {"extra_usage_until": "2026-11-13"}, today)[0], "ok")
+        self.assertEqual(oc.quota_verdict(spent, {"extra_usage_until": "2026-11-12"}, today)[0], "exhausted")
+
+    def test_declaration_does_not_lift_a_provider_flagged_window_with_allowance_left(self):
+        flagged = {"status": "ok", "windows": [
+            {"name": "weekly", "remainingPercent": 84, "windowStatus": "rate-limited"}]}
+        self.assertEqual(oc.quota_verdict(flagged, {"extra_usage_until": "2999-01-01"})[0], "exhausted")
+        erroring = {"status": "ok", "windows": [
+            {"name": "weekly", "remainingPercent": 84, "windowStatus": "error"}]}
+        self.assertEqual(oc.quota_verdict(erroring, {"extra_usage_until": "2999-01-01"})[0], "exhausted")
+
+    def test_declaration_still_covers_a_spent_window_the_provider_also_flags(self):
+        spent_and_flagged = {"status": "ok", "windows": [
+            {"name": "monthly", "remainingPercent": 0, "windowStatus": "rate-limited"}]}
+        self.assertEqual(
+            oc.quota_verdict(spent_and_flagged, {"extra_usage_until": "2999-01-01"})[0], "ok")
+
+    def test_expired_declaration_is_named_in_the_exhausted_text(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        verdict, text = oc.quota_verdict(
+            spent, {"extra_usage_until": "2026-01-01"}, date(2026, 11, 13))
+        self.assertEqual(verdict, "exhausted")
+        self.assertIn("extra usage declaration expired 2026-01-01", text)
+
+    def test_malformed_extra_usage_date_never_rescues_a_spent_window(self):
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0}]}
+        self.assertEqual(oc.quota_verdict(spent, {"extra_usage_until": "soon"})[0], "exhausted")
+
+    def test_extra_usage_does_not_override_a_healthy_window_reading(self):
+        healthy = {"status": "ok", "windows": [{"name": "weekly", "remainingPercent": 84}]}
+        verdict, text = oc.quota_verdict(healthy, {"extra_usage_until": "2999-01-01"})
+        self.assertEqual(verdict, "ok")
+        self.assertNotIn("extra usage", text)
+
 
 class FreeGuardTest(unittest.TestCase):
     """An overlay must not be able to turn the shell guard off by asserting a flag."""
@@ -343,6 +419,48 @@ class ValidateTest(unittest.TestCase):
     def test_review_only_entry_is_allowed(self):
         roster = [entry("minimax-coding-plan/mm", "review", 1, variant="")]
         self.assertEqual([p for p in self.problems(roster) if "work tiers" in p], [])
+
+    def test_malformed_extra_usage_date_is_a_structural_problem(self):
+        roster = [entry("claude-code/a", "cross_module", 1, extra_usage_until="next month")]
+        self.assertTrue([p for p in self.problems(roster) if "extra_usage_until" in p])
+
+    def test_well_formed_dates_pass_structure_including_a_past_one(self):
+        # A past date is legal: expiry is a lint note, never a dispatch block.
+        for declared in ("2027-01-01", "2020-01-01"):
+            roster = [entry("claude-code/a", "cross_module", 1, extra_usage_until=declared)]
+            self.assertEqual([p for p in self.problems(roster) if "extra_usage_until" in p], [], declared)
+
+    def test_short_and_padded_dates_are_rejected_too(self):
+        # The message promises YYYY-MM-DD; strptime alone would take 2027-1-1.
+        for declared in ("2027-1-1", "2027-1-01", "2027-01-1"):
+            roster = [entry("claude-code/a", "cross_module", 1, extra_usage_until=declared)]
+            self.assertTrue([p for p in self.problems(roster) if "extra_usage_until" in p], declared)
+
+    def test_lint_names_an_expired_declaration_on_a_subscription_route(self):
+        roster = [entry("opencode-go/one", "slice", 1, extra_usage_until="2020-01-01")]
+        buffer = io.StringIO()
+        with patch.object(oc, "load_roster", return_value=roster), \
+             patch.object(oc, "catalogue_for", return_value={"opencode-go/one": ["high"]}), \
+             patch.object(oc, "validate", return_value=[]), \
+             redirect_stdout(buffer):
+            code = oc.cmd_lint(SimpleNamespace())
+        self.assertIn("extra usage declaration expired 2020-01-01", buffer.getvalue())
+        self.assertEqual(code, 0)
+
+    def test_expired_declaration_is_quiet_for_a_route_with_no_subscription_window(self):
+        roster = [entry("openrouter/thing", "slice", 1, extra_usage_until="2020-01-01")]
+        buffer = io.StringIO()
+        with patch.object(oc, "load_roster", return_value=roster), \
+             patch.object(oc, "catalogue_for", return_value={"openrouter/thing": ["high"]}), \
+             patch.object(oc, "validate", return_value=[]), \
+             redirect_stdout(buffer):
+            oc.cmd_lint(SimpleNamespace())
+        self.assertNotIn("extra usage", buffer.getvalue())
+
+    def test_compact_and_week_dates_are_rejected(self):
+        for declared in ("20270101", "2027-W01-1", "01/01/2027"):
+            roster = [entry("claude-code/a", "cross_module", 1, extra_usage_until=declared)]
+            self.assertTrue([p for p in self.problems(roster) if "extra_usage_until" in p], declared)
 
     def test_two_work_tiers_is_a_problem(self):
         bad = entry("claude-code/a", "slice", 1)
