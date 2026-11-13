@@ -230,8 +230,10 @@
     # `not_found`, and a hidden one is still reported missing without its
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
+    #
+    # This revision is 12 commits after the previous pin (revCount 717 to 729).
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=654305e9eed472975ec27c73d65dbd934a61738b";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=987000e82275af3711b2f0ead1266675856a47a2";
       flake = false;
     };
 
