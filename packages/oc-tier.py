@@ -3,8 +3,11 @@
 
 The roster is the only place model ids live. This helper never picks a model by
 judgement: it takes a tier, walks that tier's candidates in order, and either
-finds one that the live catalogue confirms and the quota collector does not
-report exhausted, or stops and says why.
+finds one that the live catalogue confirms and whose subscription windows are not
+spent, or stops and says why. A roster entry may declare `extra_usage_until`, which
+lets a window the collector reports as *spent* still route while the account has
+paid extra usage behind it; it never lifts a window that is only flagged by the
+provider while allowance remains, because extra usage does not clear a throttle.
 
 stdout carries the session id and nothing else, so `SID=$(oc-tier create ...)`
 works. Everything a human reads - the announcement, every skip, every refusal -
@@ -254,6 +257,14 @@ def validate_structure(entries: list[dict]) -> list[str]:
             problems.append(f"{name}: checked must be an ISO date, not {entry['checked']!r}")
         # A date ahead of the host clock is a clock problem, not a roster problem:
         # it must not stop dispatch on a read-only base entry. lint warns instead.
+        # Only an explicit date switches a spent window back on, and a date that
+        # cannot be parsed is a mistake, not a route death: catch it here so it
+        # never silently reads as "no extra usage" in resolve(). An *expired* date
+        # is legal and expected, so it is a lint note, not a structural problem.
+        declared = entry.get("extra_usage_until")
+        if declared not in (None, "") and strict_date(declared) is None:
+            problems.append(
+                f"{name}: extra_usage_until must be a YYYY-MM-DD date, not {declared!r}")
     return problems
 
 
@@ -387,8 +398,50 @@ def binding_window(record: dict | None) -> dict | None:
     return min(usable, key=lambda w: _percent(w.get("remainingPercent")))
 
 
-def quota_verdict(record: dict | None) -> tuple[str, str]:
-    """Return (verdict, human text). verdict is 'ok', 'n/a' or 'exhausted'."""
+def strict_date(raw) -> datetime.date | None:
+    """Parse an exact `YYYY-MM-DD` date, or None.
+
+    `strptime` alone also accepts `2027-1-1`, so the shape is checked first: the
+    error messages promise `YYYY-MM-DD`, and a parser that quietly takes more than
+    the message allows is a promise the code does not keep.
+    """
+    text = str(raw)
+    if len(text) != 10 or text[4] != "-" or text[7] != "-":
+        return None
+    try:
+        return datetime.datetime.strptime(text, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _extra_usage_until(entry: dict | None) -> datetime.date | None:
+    """The date through which this route may run on the account's paid extra usage.
+
+    The collector reports the included allowance only; it cannot see whether the
+    account has extra usage enabled, so a spent window is indistinguishable from a
+    spent window with credits behind it. A declared end date is the operator's
+    statement about their own account: it lets a spent window route through its
+    declared date and refuses again the day after, so nobody has to remember to
+    remove it. Strict `YYYY-MM-DD` only: `date.fromisoformat` also accepts
+    compact and week forms, and an operator hand-typing a date deserves the plain
+    format spelled out in the error rather than a lenient parse.
+    """
+    if not entry:
+        return None
+    return strict_date(entry.get("extra_usage_until"))
+
+
+def quota_verdict(record: dict | None, entry: dict | None = None,
+                  today: datetime.date | None = None) -> tuple[str, str]:
+    """Return (verdict, human text). verdict is 'ok', 'n/a' or 'exhausted'.
+
+    `entry` supplies an optional `extra_usage_until` declaration. It lifts a refusal
+    only when the allowance is *spent*: a provider flag on a window that still has
+    allowance is a different failure and stays refused, because paid extra usage does
+    not clear a throttle. A window that is spent *and* flagged is lifted, because
+    there the flag is a consequence of the spend. `today` exists so the expiry
+    boundary is testable.
+    """
     if record is None:
         return "n/a", "quota: n/a (no subscription window)"
     if record.get("status") != "ok":
@@ -400,7 +453,16 @@ def quota_verdict(record: dict | None) -> tuple[str, str]:
     status = window.get("windowStatus")
     reset = window.get("resetAtEdt") or "unknown"
     text = f"quota: {window.get('name')} {remaining:g}% left, resets {reset}"
-    if remaining < QUOTA_FLOOR_PERCENT or (status and status != "ok"):
+    spent = remaining is not None and remaining < QUOTA_FLOOR_PERCENT
+    flagged = bool(status) and status != "ok"
+    if spent or flagged:
+        until = _extra_usage_until(entry)
+        if spent and until is not None:
+            if until >= (today or datetime.date.today()):
+                return "ok", f"{text} — on extra usage declared until {until.isoformat()}"
+            # Expiry is the likeliest reason a route "worked yesterday": say so
+            # instead of reporting a bare spend, which reads like nothing changed.
+            return "exhausted", f"{text} — extra usage declaration expired {until.isoformat()}"
         return "exhausted", text
     return "ok", text
 
@@ -431,7 +493,7 @@ def resolve(tier: str, entries: list[dict], live: dict[str, list[str]], private:
         if entry["variant"] and entry["variant"] not in live[entry["id"]]:
             steps.append({"id": entry["id"], "cause": "variant", "detail": f"{entry['variant']!r} not offered", "label": label})
             continue
-        verdict, text = quota_verdict(quota_snapshot(QUOTA_KEYS.get(provider_of(entry["id"])), cache))
+        verdict, text = quota_verdict(quota_snapshot(QUOTA_KEYS.get(provider_of(entry["id"])), cache), entry)
         if verdict == "exhausted":
             steps.append({"id": entry["id"], "cause": "quota", "detail": text, "label": label})
             continue
@@ -501,6 +563,13 @@ def cmd_lint(args) -> int:
             print(f"oc-tier lint: {entry['_file']}: checked {age} days ago (stale, not fatal)")
         elif age < 0:
             print(f"oc-tier lint: {entry['_file']}: checked date is {abs(age)} days in the future (clock?)")
+        # Only subscription-backed routes can be refused for a spent window, so an
+        # expired declaration anywhere else is noise.
+        declared = _extra_usage_until(entry) if provider_of(entry["id"]) in QUOTA_KEYS else None
+        if declared is not None and declared < today:
+            print(f"oc-tier lint: {entry['_file']}: extra usage declaration expired "
+                  f"{declared.isoformat()}; a spent window on this route will refuse again "
+                  f"(not fatal)")
     base = sum(1 for entry in entries if entry.get("_source") == "base")
     local = len(entries) - base
     print(f"oc-tier lint: {len(entries)} entries ({base} base, {local} local), {len(problems)} problem(s)")
