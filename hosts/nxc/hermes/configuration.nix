@@ -815,21 +815,35 @@ in
       };
 
       # Native delegate_task controls (Bernie's delegation path).
-      # Workers run MiniMax M3.1 on the MiniMax route, a different provider from
-      # the conversation default; no delegation fallback is configured, so an
-      # outage there stops worker calls even when the main route has fallbacks.
+      # Workers run Claude Haiku on the subscription route, so the primary
+      # worker route leaves the MiniMax plan. MiniMax M3.1 carries the
+      # auxiliary lanes below, titles excepted, and appears in delegation only
+      # as the last-resort
+      # fallback. Haiku was more efficient than M3.1 in the child sessions
+      # measured here: 13 Haiku child sessions recorded a median of 14 rounds
+      # against roughly 38 for M3.1's. Those ran under different effort
+      # settings and tasks, so read it as directional rather than controlled.
+      # Rounds matter because a child that reaches the ceiling is truncated
+      # rather than merely slow.
       # `reasoning_effort` replaces the inherited session effort for each child
       # (tools/delegate_tool_config.py), so this key — not the per-model
-      # override below — decides worker effort. Set deliberately at `low`
-      # rather than the route baseline: children on this model were observed
-      # over-thinking and re-entering tool loops, and a lower effort shortens
-      # the reasoning before each call. Raise it only if worker output quality
-      # drops, since this is the lever for both latency and thrash.
+      # override below — decides worker effort. All 13 prior Haiku child
+      # sessions recorded `medium`; lowering it further trades tool discipline
+      # for latency, which is the wrong trade for repo work.
+      # `fallback_providers` is required here and is not inherited: a child
+      # pinned to this route never borrows the conversation chain, so without
+      # this list a provider quota wall kills the child outright. That has
+      # already happened once, and it was MiniMax that returned the wall, so
+      # MiniMax sits last with the reseller ahead of it.
       # Serial concurrency and depth 1 keep this pilot bounded and leaf-only.
       delegation = {
-        provider = "minimax";
-        model = "MiniMax-M3.1-Flash";
-        reasoning_effort = "low";
+        provider = "claude-subscription-directsdk-experimental";
+        model = "claude-haiku-5-5";
+        reasoning_effort = "medium";
+        fallback_providers = [
+          { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
+          { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
+        ];
         max_concurrent_children = 1;
         max_spawn_depth = 1;
         max_iterations = 40;
@@ -912,9 +926,19 @@ in
         presets.lite.enabled = false;
       };
 
-      # Auxiliary task assignments. minimax carries the background work; every
-      # lane here declares its own cross-provider fallback chain. Reasoning is
-      # task-level and applies uniformly to every fallback candidate.
+      # Auxiliary task assignments. minimax carries the background work at
+      # M3.1 on every lane but one: title_generation runs on M2.7, which is
+      # sufficient for a short label. Every lane also falls back to a different
+      # provider. Fallbacks are drawn from three
+      # models across two routes: MiMo 2.6 Flash where images or extracted
+      # pages are involved, DeepSeek V4.1 Flash over the reseller for the
+      # remaining lanes, and Claude Haiku on the two lanes that make a
+      # judgement — review and approval. Those two keep Claude because their
+      # answer decides something: a review sign-off, or whether a tool call is
+      # auto-approved. Review's fallback drops from Opus to Haiku, which was
+      # more subscription spend than a background lane justifies. Approval was
+      # already on Haiku and is unchanged. Reasoning is task-level and applies
+      # uniformly to every fallback candidate.
       auxiliary = {
         provider = "minimax";
         model = "MiniMax-M3.1-Flash";
@@ -924,7 +948,7 @@ in
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
+            { provider = "opencode-go"; model = "mimo-v2.6-flash"; }
           ];
         };
 
@@ -933,7 +957,7 @@ in
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
           ];
         };
 
@@ -942,7 +966,7 @@ in
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
           ];
         };
 
@@ -951,10 +975,13 @@ in
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
           ];
         };
 
+        # The guardian decides whether a tool call is auto-approved, so its
+        # fallback stays on Claude with review, for the same reason: a cheap
+        # fallback here could wave something through rather than escalate.
         approval = {
           provider = "minimax";
           model = "MiniMax-M3.1-Flash";
@@ -964,12 +991,15 @@ in
           ];
         };
 
+        # Titles are the one lane where a smaller model is the right call:
+        # the output is a short label, nothing downstream depends on its
+        # judgement, and M2.7 is already credentialed on this same provider.
         title_generation = {
           provider = "minimax";
-          model = "MiniMax-M3.1-Flash";
+          model = "MiniMax-M2.7";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
           ];
         };
 
@@ -978,30 +1008,33 @@ in
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "medium";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
+            { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
           ];
         };
 
-        # minimax carries vision. Both this route and the Sonnet fallback must
+        # minimax carries vision. Both this route and the MiMo fallback must
         # pass the post-deploy image smoke.
         vision = {
           provider = "minimax";
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "low";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-sonnet-5-5"; }
+            { provider = "opencode-go"; model = "mimo-v2.6-flash"; }
           ];
         };
 
         # /review launches a full reviewer subagent. The reasoning effort is
-        # unchanged from the previous reviewer route; the Opus entry is the
-        # cross-provider availability fallback.
+        # unchanged from the previous reviewer route. The fallback drops from
+        # Opus to Haiku: Opus was more subscription spend than a background
+        # lane justifies, and a reseller flash tier could let a bad review
+        # through unnoticed, so the fallback stays on Haiku rather than a
+        # reseller flash tier.
         review = {
           provider = "minimax";
           model = "MiniMax-M3.1-Flash";
           reasoning_effort = "xhigh";
           fallback_chain = [
-            { provider = "claude-subscription-directsdk-experimental"; model = "claude-opus-5-5[1m]"; }
+            { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
           ];
         };
       };
