@@ -729,17 +729,6 @@ in
       # WHATSAPP_ENABLED is true/1/yes, so leaving it unset keeps WhatsApp off.
       # WHATSAPP_ALLOWED_USERS in the encrypted environment file is inert while
       # the platform is off; drop it there when that file is next edited.
-
-      # Mattermost — MATTERMOST_URL must be an env var: when MATTERMOST_TOKEN
-      # is set, gateway/config.py overwrites platforms.mattermost.extra.url
-      # with $MATTERMOST_URL (empty if unset), so the declarative extra.url is
-      # ignored. hermes reaches the server over Tailscale. MATTERMOST_ALLOWED_USERS
-      # is also mirrored into systemd.services.hermes-agent.environment below
-      # (the allow-list check reads it via os.getenv at startup). The bot token
-      # lives in the openclaw-env secret as MATTERMOST_TOKEN.
-      MATTERMOST_URL = "http://mattermost:8065";
-      MATTERMOST_ALLOWED_USERS = "yyhr83fpj3n3fpnjzf3o1zah6r";
-      MATTERMOST_HOME_CHANNEL = "s5yp7xu9iif3mjrw9zczwcg5ro";
     };
 
     # The voice-only health plugin owns a single write capability. Its Google
@@ -1291,17 +1280,15 @@ in
           };
         };
 
-        # Mattermost ops surface. hermes reaches the server over Tailscale
-        # (bifrost is only for the phone/browser). Connection is driven by the
-        # MATTERMOST_* env vars in the environment block above (url, token,
-        # allowed users, home channel) — when MATTERMOST_TOKEN is set the
-        # gateway sources the url from $MATTERMOST_URL, overriding extra.url,
-        # so the url lives there, not here.
+        # Mattermost is retired, but this block must stay explicitly disabled until
+        # MATTERMOST_TOKEN is removed from the openclaw-env secret. Upstream treats that
+        # token as an enable credential (plugins/platforms/mattermost/gateway_env.py,
+        # ENV_ENABLE_CREDENTIALS), so deleting this block alone lets the env pass
+        # re-enable the platform with no URL, which surfaces as a broken adapter. An
+        # explicit `enabled` key sets the loader's _enabled_explicit marker, which the
+        # env pass honours and only warns about once.
         mattermost = {
-          enabled = true;
-          extra = {
-            reply_mode = "off";
-          };
+          enabled = false;
         };
       };
 
@@ -1347,7 +1334,6 @@ in
   systemd.services.hermes-agent.environment = {
     TELEGRAM_ALLOWED_USERS = "748642877";
     HERMES_MANAGED = "true";
-    MATTERMOST_ALLOWED_USERS = "yyhr83fpj3n3fpnjzf3o1zah6r";
     WIKI_PATH = "/var/lib/hermes/vault/MontyVault/Hermes/Wiki";
     PYTHONPATH = mnemosynePythonPath;
   };
