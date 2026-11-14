@@ -2261,7 +2261,18 @@ if __name__ == "__main__":
     # extraPlugins restart trigger), and the subscription model-provider plugin
     # resolves its transport by looking up the vendor CLI on PATH. Without this
     # the dashboard's provider discovery cannot see the CLI.
-    path = [ claudeCodeForHermes ];
+    #
+    # gnupg is here for the same reason, and the failure it fixes is hard to place:
+    # hermes-proton shells out to `gpg` to mint the key for a new Drive node, and
+    # three operations do that - creating a folder, uploading a file, and
+    # creating a share link (protonlite/drive.py calls generate_calendar_key for
+    # each). With gpg absent from this PATH those three fail with "provisioning a
+    # new calendar needs the 'gpg' command, which is not installed", a message
+    # that names neither Drive nor PATH. Trash, move and rename do not mint a key
+    # and are unaffected. The package comes from this `path` list plus systemd's
+    # defaultPath, which carries no gnupg; the gateway gets it through
+    # services.hermes-agent.extraPackages instead.
+    path = [ claudeCodeForHermes pkgs.gnupg ];
     environment = {
       HOME = "/var/lib/hermes";
       HERMES_HOME = "/var/lib/hermes/.hermes";
