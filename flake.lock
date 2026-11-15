@@ -253,6 +253,23 @@
         "type": "github"
       }
     },
+    "philly-masters": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794765509,
+        "narHash": "sha256-xcS1s3/wRkv7jJtv5Ake57DTcwykST0Zjsh9LlM24UE=",
+        "ref": "refs/heads/main",
+        "rev": "5273309d5a18048fe981dfb77119bad831fde5f7",
+        "revCount": 105,
+        "type": "git",
+        "url": "https://git.montycasa.net/patrick/philly-masters"
+      },
+      "original": {
+        "rev": "5273309d5a18048fe981dfb77119bad831fde5f7",
+        "type": "git",
+        "url": "https://git.montycasa.net/patrick/philly-masters"
+      }
+    },
     "plasma-manager": {
       "inputs": {
         "home-manager": [
@@ -338,6 +355,7 @@
         "nixpkgs-elegoo-compat": "nixpkgs-elegoo-compat",
         "nixpkgs-unstable": "nixpkgs-unstable",
         "nookbridge": "nookbridge",
+        "philly-masters": "philly-masters",
         "plasma-manager": "plasma-manager",
         "sops-nix": "sops-nix"
       }

@@ -237,6 +237,16 @@
       flake = false;
     };
 
+    # The Philly Masters Pool application, pinned to the merged commit that
+    # first renders standings. The application lives in its own public
+    # repository and is consumed here as source: its own flake is a development
+    # convenience, and ./packages/philly-masters.nix builds it against this
+    # flake's nixpkgs so a host has one package universe rather than two.
+    philly-masters = {
+      url = "git+https://git.montycasa.net/patrick/philly-masters?rev=5273309d5a18048fe981dfb77119bad831fde5f7";
+      flake = false;
+    };
+
     # Heimdall — the read-only switch console. Pinned to a reviewed commit: this
     # is the only thing on the network permitted to read switch state, so what
     # runs is exactly what was reviewed, not whatever main happens to be.
