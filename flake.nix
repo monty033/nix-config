@@ -231,9 +231,9 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     #
-    # This revision is 12 commits after the previous pin (revCount 717 to 729).
+    # This revision is 2 commits after the previous pin (revCount 729 to 731).
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=987000e82275af3711b2f0ead1266675856a47a2";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=dc89bf7eb62277ba7379a9ee403b1c3103cd8679";
       flake = false;
     };
 
