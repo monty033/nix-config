@@ -327,7 +327,9 @@ class RunTests(unittest.TestCase):
         self.assertEqual(len(dav.puts), 2)
         self.assertEqual(first["remote_after"], 2)
         self.assertTrue(first["match"])
-        self.assertTrue(dav.ensure_called)
+        # Listing no longer creates the calendar as a side effect; creation is
+        # opt-in per pair and covered in the multi-pair suite.
+        self.assertEqual(dav.ensure_called, [])
 
         second = mirror.run(self.ics, apply=True, dav=dav, state_file=self.state)
         self.assertEqual(second["create"], 0)

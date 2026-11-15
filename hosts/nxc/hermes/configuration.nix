@@ -30,6 +30,35 @@ let
       "${opencode-goal-plugin}/share/opencode-goal-plugin"
     ];
   });
+
+
+
+  # Appends one counts-only line when a calendar unit fails. systemd passes the
+  # failed unit as the instance; the watchdog turns the code into a phrase.
+  # Deliberately outside the calendars directory: the path unit watches that
+  # directory recursively, and a state write inside it would retrigger the unit.
+  caldavStateDir = "/var/lib/hermes/.hermes/workspace/calendar-mirror-state";
+  caldavStateFile = "${caldavStateDir}/state.json";
+  caldavFailureSpool = "${caldavStateDir}/failures.jsonl";
+  caldavAlert = pkgs.writeShellScript "calendar-pipeline-alert" ''
+    set -eu
+    spool=${caldavFailureSpool}
+    mkdir -p "$(dirname "$spool")"
+    # The unit name is JSON-escaped, and 1 is a code the watchdog has a phrase
+    # for ("the mirror crashed"), so a failure never reads as an unknown code.
+    unit=$(printf '%s' "''${1:-unknown}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    # If the mirror wrote its own record moments ago, this hook is the same
+    # failure: stay quiet rather than announce a crash that did not happen.
+    if [ -f "$spool" ] && [ -n "$(find "$spool" -newermt '-60 seconds' 2>/dev/null)" ]; then
+      exit 0
+    fi
+    # The unit's own exit status is the code the contract defines; 1 means the
+    # mirror died before it could write its own record.
+    code="''${EXIT_STATUS:-1}"
+    case "$code" in (0|"") code=1 ;; esac
+    printf '{"at":"%s","unit":"%s","source":"hook","code":%s,"pairs":0,"failed":1,"empty":0}\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" "$unit" "$code" >> "$spool"
+  '';
   # Hermes' stable Tailscale IPv4 address (also used by the local-proxy
   # dashboard upstream).
   hermesTailscaleIp = "100.81.254.49";
@@ -306,6 +335,32 @@ let
     export PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils ]}
     exec ${calendarPython}/bin/python3 ${familyCalendarSource}/caldav_mirror.py "$@"
   '';
+  # One feed→collection pair per line. Only the spike pair is enabled until the
+  # production collections exist (calendar-caldav-migration.md stage 2); the
+  # rest are declared here so enabling one is a one-word change.
+  caldavPairs = pkgs.writeText "caldav-mirror-pairs.json" (builtins.toJSON {
+    pairs = [
+      # The same feed appears twice: the spike calendar and the production one.
+      # Enabling the production pair means disabling this one, or the same
+      # events land in two calendars and Home Assistant shows them twice.
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/family.ics"; collection = "spike-family";
+        enabled = true; create_calendar = true; }
+      # Production pairs: disabled until the cutover. They carry no
+      # `create_calendar`, so a mistyped collection name is refused with code 13
+      # instead of quietly creating a second, empty calendar. The seven
+      # collections are created once, by hand or by a one-off run that passes
+      # `--create-calendar`, before these are enabled.
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/family.ics"; collection = "family"; enabled = false; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/patrick.ics"; collection = "patrick"; enabled = false; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/lina.ics"; collection = "lina"; enabled = false; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/aleandra.ics"; collection = "aleandra"; enabled = false; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/emma.ics"; collection = "emma"; enabled = false; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/isabella.ics"; collection = "isabella"; enabled = false; }
+      # Juliana's feed carries no events for long stretches; that is a real
+      # state, not a broken feed, so it must not fail the run.
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/juliana.ics"; collection = "juliana"; enabled = false; allow_empty = true; }
+    ];
+  });
   sportsCalendarSource = ../../../scripts/calendar-publish/philly-sports-cal;
   sportsCalendarPublisher = pkgs.writeShellScriptBin "sports-calendar-publisher" ''
     export PYTHON=${calendarPython}/bin/python3
@@ -1891,7 +1946,10 @@ if __name__ == "__main__":
   # not a transaction member. It does wait for the agent, because the
   # credentials come from the .env that the agent module generates.
   systemd.services.calendar-caldav-mirror = {
-    description = "Mirror family.ics into CalDAV (spike)";
+    description = "Mirror published calendars into CalDAV";
+    # A crash still leaves a record even when Python never reaches its own
+    # spool write; the watchdog dedupes by code.
+    unitConfig.OnFailure = "calendar-pipeline-alert@%N.service";
     wants = [ "network-online.target" "hermes-agent.service" ];
     after = [ "network-online.target" "hermes-agent.service" "sops-install-secrets.service" ];
     environment = {
@@ -1904,7 +1962,10 @@ if __name__ == "__main__":
       Group = "users";
       WorkingDirectory = "/var/lib/hermes";
       UMask = "0077";
-      ExecStart = "${caldavMirror}/bin/caldav-family-mirror --apply";
+      # The pair list is copied where the watchdog looks for it, so the daily
+      # deep check and the service always mirror the same pairs.
+      ExecStartPre = "${pkgs.coreutils}/bin/install -D -m 0600 ${caldavPairs} ${caldavStateDir}/pairs.json";
+      ExecStart = "${caldavMirror}/bin/caldav-family-mirror --apply --pairs ${caldavStateDir}/pairs.json --state ${caldavStateFile} --spool ${caldavFailureSpool}";
       TimeoutStartSec = 300;
     };
   };
@@ -1912,7 +1973,13 @@ if __name__ == "__main__":
   systemd.paths.calendar-caldav-mirror = {
     wantedBy = [ "paths.target" ];
     pathConfig = {
-      PathChanged = "/var/lib/hermes/.hermes/workspace/calendars/family.ics";
+      # Both a trailing-glob file watch and the directory watch: a rename of
+      # <name>.ics.new onto <name>.ics changes the directory, an in-place
+      # rewrite changes only the file, and either must trigger a mirror run.
+      PathChanged = [
+        "/var/lib/hermes/.hermes/workspace/calendars/*.ics"
+        "/var/lib/hermes/.hermes/workspace/calendars"
+      ];
       Unit = "calendar-caldav-mirror.service";
     };
   };
@@ -1920,9 +1987,21 @@ if __name__ == "__main__":
   systemd.timers.calendar-caldav-mirror = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnCalendar = "*-*-* 00/6:20:00 America/New_York";
+      OnCalendar = "hourly";
       Persistent = true;
       Unit = "calendar-caldav-mirror.service";
+    };
+  };
+
+  # Receives OnFailure from calendar units and records it for the watchdog.
+  systemd.services."calendar-pipeline-alert@" = {
+    description = "Record a calendar pipeline failure (%i)";
+    serviceConfig = {
+      Type = "oneshot";
+      User = "hermes";
+      Group = "users";
+      UMask = "0077";
+      ExecStart = "${caldavAlert} %i";
     };
   };
 
