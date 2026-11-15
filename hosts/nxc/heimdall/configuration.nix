@@ -64,15 +64,38 @@ in
       # units send it under an unauthenticated MD5 challenge instead. Neither
       # protects against an active attacker on the site LAN, so a read-only
       # switch account is the real mitigation and is not yet in place.
-      { name = "AGG-10G"; family = "hydra"; host = "192.168.86.2"; port = 80;
+      { name = "HOMELAB-AGG-10G"; family = "hydra"; host = "192.168.86.2"; port = 80;
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-2-password"; }
-      { name = "WORKSHOP"; family = "legacy"; host = "192.168.86.3"; port = 80;
+      { name = "OFFICE-SUB-2.5G"; family = "legacy"; host = "192.168.86.3"; port = 80;
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-3-password"; }
-      { name = "LIVING"; family = "legacy"; host = "192.168.86.4"; port = 80;
+      { name = "HOMELAB-POE-2.5G"; family = "legacy"; host = "192.168.86.4"; port = 80;
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-4-password"; }
-      { name = "OFFICE-2.5G"; family = "legacy"; host = "192.168.86.6"; port = 80;
+      { name = "HOMELAB-DIST-2.5G"; family = "legacy"; host = "192.168.86.6"; port = 80;
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-6-password"; }
     ];
+
+    # How the switches are wired together. The switch-to-switch links below are
+    # verified from the forwarding tables: each child's own base MAC is learned
+    # on exactly one parent port. The router's end of its link is nominal — the
+    # router is not read, so only the aggregate's port 8 is confirmed. The
+    # basement unit has no adapter, so it is drawn but not read.
+    topology = {
+      nodes = [
+        { id = "router"; label = "Router (OPNsense)"; kind = "router"; readable = false; }
+        { id = "HOMELAB-AGG-10G"; label = "HOMELAB-AGG-10G"; kind = "switch"; readable = true; }
+        { id = "HOMELAB-DIST-2.5G"; label = "HOMELAB-DIST-2.5G"; kind = "switch"; readable = true; }
+        { id = "HOMELAB-POE-2.5G"; label = "HOMELAB-POE-2.5G"; kind = "switch"; readable = true; }
+        { id = "OFFICE-SUB-2.5G"; label = "OFFICE-SUB-2.5G"; kind = "switch"; readable = true; }
+        { id = "BASEMENT-POE-1G"; label = "BASEMENT-POE-1G"; kind = "external"; readable = false; }
+      ];
+      links = [
+        { from = "router"; fromPort = 1; to = "HOMELAB-AGG-10G"; toPort = 8; speed = 10000; }
+        { from = "HOMELAB-AGG-10G"; fromPort = 6; to = "HOMELAB-POE-2.5G"; toPort = 9; speed = 10000; }
+        { from = "HOMELAB-AGG-10G"; fromPort = 7; to = "HOMELAB-DIST-2.5G"; toPort = 9; speed = 10000; }
+        { from = "HOMELAB-DIST-2.5G"; fromPort = 1; to = "OFFICE-SUB-2.5G"; toPort = 1; speed = 2500; }
+        { from = "HOMELAB-DIST-2.5G"; fromPort = 8; to = "BASEMENT-POE-1G"; toPort = 8; speed = 1000; }
+      ];
+    };
   };
 
   users.users.heimdall = {
