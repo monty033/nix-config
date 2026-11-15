@@ -74,9 +74,11 @@ in
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-6-password"; }
     ];
 
-    # How the switches are wired together, as verified from the forwarding
-    # tables: each child's own base MAC is learned on exactly one parent port.
-    # The basement unit has no adapter yet, so it is drawn but not read.
+    # How the switches are wired together. The switch-to-switch links below are
+    # verified from the forwarding tables: each child's own base MAC is learned
+    # on exactly one parent port. The router's end of its link is nominal — the
+    # router is not read, so only the aggregate's port 8 is confirmed. The
+    # basement unit has no adapter, so it is drawn but not read.
     topology = {
       nodes = [
         { id = "router"; label = "Router (OPNsense)"; kind = "router"; readable = false; }
@@ -87,7 +89,7 @@ in
         { id = "BASEMENT-POE-1G"; label = "BASEMENT-POE-1G"; kind = "external"; readable = false; }
       ];
       links = [
-        { from = "HOMELAB-AGG-10G"; fromPort = 8; to = "router"; toPort = 1; speed = 10000; }
+        { from = "router"; fromPort = 1; to = "HOMELAB-AGG-10G"; toPort = 8; speed = 10000; }
         { from = "HOMELAB-AGG-10G"; fromPort = 6; to = "HOMELAB-POE-2.5G"; toPort = 9; speed = 10000; }
         { from = "HOMELAB-AGG-10G"; fromPort = 7; to = "HOMELAB-DIST-2.5G"; toPort = 9; speed = 10000; }
         { from = "HOMELAB-DIST-2.5G"; fromPort = 1; to = "OFFICE-SUB-2.5G"; toPort = 1; speed = 2500; }
