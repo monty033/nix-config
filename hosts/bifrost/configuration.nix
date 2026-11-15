@@ -53,6 +53,20 @@
     mode = "0400";
   };
 
+  # The Philly Masters Pool. It runs here, not on a LAN host, because that keeps
+  # its only listener on loopback: no port to open, nothing to narrow, and
+  # nothing on the LAN or the tailnet can reach the server around Caddy.
+  extra-services.philly-masters = {
+    enable = true;
+    bindAddress = "127.0.0.1";
+    port = 3440;
+    publicOrigin = "https://phillymasters.montycasa.com";
+    # Patrick's own address, and a placeholder until Andrew's is known. The
+    # placeholder cannot receive mail and is not a working administrator; it is
+    # only here because the application refuses to start without exactly two.
+    adminEmails = [ "patrick@montycasa.com" "andrew-placeholder@example.com" ];
+  };
+
   extra-services.caddy-proxy = {
     enable = true;
     cloudflareTokenFile = config.sops.secrets.cloudflare-api-token.path;
@@ -146,6 +160,19 @@
       "ln.montybitcoin.com" = {
         protocol = "http";
         upstream = "http://bitcoin:8080";
+      };
+
+      # The Philly Masters Pool demo. The page is public; the application's own
+      # /admin and /me routes sit behind its login, and Caddy adds nothing in
+      # front of it. This is the standings page and nothing else yet: no live
+      # tournament feed, no entry form, no payments. The application listens on loopback here, so this vhost is
+      # the only route in from the network and the X-Forwarded-For header it
+      # keys rate limits on arrives from Caddy. A process running on this host
+      # could still reach the port directly; that is the host's own trust
+      # boundary, not a network one.
+      "phillymasters.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://127.0.0.1:3440";
       };
     };
 

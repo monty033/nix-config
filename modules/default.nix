@@ -17,6 +17,7 @@
     ./simplex-relay.nix
     ./hermes-relay.nix
     ./nookbridge.nix
+    ./philly-masters.nix
     ./intel-gpu.nix
     ./pihole
   ];
