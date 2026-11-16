@@ -96,6 +96,41 @@ in
         { from = "HOMELAB-DIST-2.5G"; fromPort = 8; to = "BASEMENT-POE-1G"; toPort = 8; speed = 1000; }
       ];
     };
+
+    # Names for devices the switches only know by address. Taken from the
+    # router's lease list, so it goes stale: refresh it when a device is
+    # renamed or added.
+    names = {
+      "00:7c:2d:93:d4:97" = "TIZEN";
+      "08:9e:08:bc:b6:65" = "Chromecast";
+      "10:3d:1c:e8:8d:8e" = "murdock";
+      "12:e0:c9:89:49:d2" = "Lenovo-Idea-Tab-Plus";
+      "1c:69:20:84:bd:98" = "espressif";
+      "20:58:43:03:91:a6" = "2MQ61304ZP";
+      "20:df:b9:13:80:fa" = "Google-Home-Mini";
+      "20:f8:3b:09:10:fe" = "home-assistant-voice-0910fe";
+      "28:68:47:33:4e:8e" = "Nuki_45320A47";
+      "34:46:63:20:64:6a" = "nursery_cam";
+      "40:ae:30:40:30:32" = "tp-link-power-strip-3032";
+      "48:5f:99:63:e3:0f" = "emma-book";
+      "48:b0:2d:e9:93:c8" = "reservation-guest-80";
+      "48:ca:43:48:60:e8" = "Toniebox";
+      "6c:1c:71:68:51:7e" = "front_door_cam";
+      "6c:f2:d8:20:74:29" = "reservation-guest-40";
+      "9c:8e:cd:2f:67:16" = "ali_cam";
+      "a4:77:33:ff:15:7a" = "Chromecast-Audio";
+      "b0:4a:39:a3:6c:3b" = "roborock-vacuum-a65";
+      "b0:e4:5c:e6:1e:ce" = "Samsung";
+      "bc:24:11:89:f4:13" = "plasma-vm-nixos";
+      "cc:db:a7:53:e6:37" = "wled-patio";
+      "d4:3a:65:14:43:5b" = "CHOPPF5VLFMK";
+      "d8:13:99:3b:aa:85" = "KitchenTV";
+      "dc:a6:32:d5:dc:1f" = "pikvm";
+      "ee:c9:76:2d:0d:9a" = "iPhone";
+      "f4:b1:c2:e6:9a:84" = "back_door_cam";
+      "f4:f5:d8:c5:34:3e" = "Google-Home";
+    };
+
   };
 
   users.users.heimdall = {
