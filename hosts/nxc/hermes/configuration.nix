@@ -340,25 +340,26 @@ let
   # rest are declared here so enabling one is a one-word change.
   caldavPairs = pkgs.writeText "caldav-mirror-pairs.json" (builtins.toJSON {
     pairs = [
-      # The same feed appears twice: the spike calendar and the production one.
-      # Enabling the production pair means disabling this one, or the same
-      # events land in two calendars and Home Assistant shows them twice.
+      # The same feed appears twice: the trial calendar and the production one.
+      # Both stay enabled until the dashboards are moved onto the production
+      # entities; the trial pair is removed in the follow-up change. Keeping it
+      # enabled in the meantime means the kiosk never reads a calendar that has
+      # stopped updating.
       { feed = "/var/lib/hermes/.hermes/workspace/calendars/family.ics"; collection = "spike-family";
         enabled = true; create_calendar = true; }
-      # Production pairs: disabled until the cutover. They carry no
-      # `create_calendar`, so a mistyped collection name is refused with code 13
-      # instead of quietly creating a second, empty calendar. The seven
-      # collections are created once, by hand or by a one-off run that passes
-      # `--create-calendar`, before these are enabled.
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/family.ics"; collection = "family"; enabled = false; }
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/patrick.ics"; collection = "patrick"; enabled = false; }
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/lina.ics"; collection = "lina"; enabled = false; }
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/aleandra.ics"; collection = "aleandra"; enabled = false; }
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/emma.ics"; collection = "emma"; enabled = false; }
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/isabella.ics"; collection = "isabella"; enabled = false; }
+      # Production pairs: the seven collections exist and are current, created
+      # by a one-off run that passed `--create-calendar`. They carry no
+      # `create_calendar` here, so a mistyped collection name is refused with
+      # code 13 instead of quietly creating a second, empty calendar.
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/family.ics"; collection = "family"; enabled = true; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/patrick.ics"; collection = "patrick"; enabled = true; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/lina.ics"; collection = "lina"; enabled = true; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/aleandra.ics"; collection = "aleandra"; enabled = true; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/emma.ics"; collection = "emma"; enabled = true; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/isabella.ics"; collection = "isabella"; enabled = true; }
       # Juliana's feed carries no events for long stretches; that is a real
       # state, not a broken feed, so it must not fail the run.
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/juliana.ics"; collection = "juliana"; enabled = false; allow_empty = true; }
+      { feed = "/var/lib/hermes/.hermes/workspace/calendars/juliana.ics"; collection = "juliana"; enabled = true; allow_empty = true; }
     ];
   });
   sportsCalendarSource = ../../../scripts/calendar-publish/philly-sports-cal;
