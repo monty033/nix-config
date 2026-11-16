@@ -149,6 +149,12 @@ in
         # sender when logins become real. Until then, no login email is sent.
         EMAIL_PROVIDER = "outbox";
         ALLOW_OUTBOX = "1";
+        # With no provider, the outbox keeps its messages in memory and nobody can read
+        # them — including whoever is testing the login or the address-change link. The
+        # file sink makes those links readable by the service's user only. It holds live
+        # bearer links, so it is a credential store: unset it the day a provider is
+        # configured, and it is never set for zeptomail.
+        OUTBOX_FILE = "${stateDir}/outbox.jsonl";
       };
 
       serviceConfig = {
