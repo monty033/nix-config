@@ -1933,10 +1933,18 @@ if __name__ == "__main__":
     };
   };
 
+  # Hourly, because the last hop is now CalDAV: Home Assistant reads the server
+  # on every render, so the only remaining lag is how often upstream is asked.
+  # An unchanged publish rewrites nothing and deploys nothing, so the extra runs
+  # cost one fetch each. The jitter keeps the four upstream services from seeing
+  # every host on the hour.
   systemd.timers.family-calendar-publish = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnCalendar = "*-*-* 00/4:00:00 America/New_York";
+      # Explicit zone, like the timer it replaces: "hourly" alone would follow
+      # whatever the host timezone is set to.
+      OnCalendar = "*-*-* *:00:00 America/New_York";
+      RandomizedDelaySec = "300";
       Persistent = true;
       Unit = "family-calendar-publish.service";
     };
