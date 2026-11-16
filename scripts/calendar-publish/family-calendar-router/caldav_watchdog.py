@@ -10,8 +10,9 @@ What it checks:
 1. **Failure spool** — the mirror appends one JSON line per failed run. Each
    line is turned into a fixed phrase from the code, never from stderr.
 2. **Freshness** — the mirror's state must be at least as new as the newest
-   published feed, within a grace window; and no successful run for two hours
-   is an alert on its own, because the timer backstop is hourly.
+   published feed, within a grace window; and the publisher must not have gone
+   quiet, judged by feed age rather than by the mirror's state, which only
+   moves when a run changes something.
 3. **Deep verify, once a day** — a full read-back comparison catches drift the
    checksum in the state file cannot see.
 
@@ -42,8 +43,11 @@ DEFAULT_PAIRS = HERMES_HOME / "workspace/calendar-mirror-state/pairs.json"
 
 # Grace window between a feed being published and the mirror having caught up.
 BEHIND_GRACE = dt.timedelta(minutes=20)
-# The timer backstop runs hourly; two hours means two missed runs.
-STALE_AFTER = dt.timedelta(hours=2)
+# The publisher rewrites every feed on every run, so an old feed file means an
+# old publish. Nine hours tolerates one missed four-hourly run plus slack; drop
+# it to about 2.5 h in the change that moves the publish to hourly.
+FEED_MAX_AGE = dt.timedelta(hours=9)
+DEFAULT_PUBLISH_STATE = HERMES_HOME / "workspace/calendar-publish-state/heartbeat.json"
 
 # A canary is one event, created by hand, that must survive the whole path.
 CANARY_TTL = dt.timedelta(hours=20)   # check at most once a day
@@ -136,10 +140,48 @@ def new_spool_lines(path: Path, cursor: dict) -> tuple[list[dict], int, str]:
 
 
 def newest_feed(calendars: Path) -> dt.datetime | None:
-    times = [p.stat().st_mtime for p in calendars.glob("*.ics") if p.is_file()]
+    """The most recently modified feed, ignoring any that vanish mid-listing."""
+    times = []
+    for path in calendars.glob("*.ics"):
+        try:
+            if path.is_file():
+                times.append(path.stat().st_mtime)
+        except OSError:
+            continue  # replaced or removed between the glob and the stat
     if not times:
         return None
     return dt.datetime.fromtimestamp(max(times), dt.timezone.utc)
+
+
+def heartbeat_age(path: Path, now: dt.datetime) -> str:
+    """A short phrase describing the publisher's last success, for alert text."""
+    try:
+        payload = json.loads(path.read_text())
+        stamp = dt.datetime.fromisoformat(payload["last_success"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return " and there is no readable heartbeat"
+    if stamp.tzinfo is None:
+        # A timestamp without a zone is not something to guess at.
+        return " and its heartbeat has no timezone"
+    return f"; the last successful run was {max(0, int((now - stamp).total_seconds() // 60))} min ago"
+
+
+def publisher_alerts(newest: dt.datetime | None, publish_state: Path,
+                     now: dt.datetime, feed_max: dt.timedelta) -> list[str]:
+    """Is the publisher still publishing?
+
+    Feed age, not state age: the mirror only writes state when it changes
+    something, so an idle mirror would otherwise look dead. One line only, so a
+    dead publisher cannot alert twice.
+    """
+    if newest is None:
+        # No feed file at all: a wiped or never-written directory.
+        return ["calendar publisher: there are no feed files to publish from"]
+    if now - newest <= feed_max:
+        return []
+    hours = int((now - newest).total_seconds() // 3600)
+    return [f"calendar publisher: the feeds are {hours} h old"
+            f"{heartbeat_age(publish_state, now)}"]
 
 
 DUPLICATE_WINDOW = 90  # seconds
@@ -257,6 +299,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--canary-summary",
                         help="summary of one event that must survive the path")
     parser.add_argument("--canary-collection", default="family")
+    parser.add_argument("--publish-state", default=str(DEFAULT_PUBLISH_STATE),
+                        help="the publisher's heartbeat file")
+    parser.add_argument("--feed-max-hours", type=float, default=FEED_MAX_AGE.total_seconds() / 3600,
+                        help="how old the newest feed may be before the publisher is called dead")
     parser.add_argument("--now", help="override the clock (tests)")
     args = parser.parse_args(argv)
 
@@ -278,21 +324,22 @@ def main(argv: list[str] | None = None) -> int:
     cursor["spool_offset"] = size
     cursor["spool_inode"] = identity
 
-    # Freshness: has the mirror caught up with the newest published feed?
+    # Freshness. The publisher check runs whether or not the mirror has a state
+    # file: a missing state is one problem and a dead publisher is another.
+    newest = newest_feed(Path(args.calendars))
     try:
         state_mtime = dt.datetime.fromtimestamp(state.stat().st_mtime, dt.timezone.utc)
-        state_age = now - state_mtime
-        newest = newest_feed(Path(args.calendars))
         if newest is not None and newest - state_mtime > BEHIND_GRACE:
             behind = int((newest - state_mtime).total_seconds() // 60)
             alerts.append(f"calendar mirror: {behind} min behind the last published feed")
-        if state_age > STALE_AFTER:
-            alerts.append(f"calendar mirror: no successful run for {int(state_age.total_seconds() // 3600)} h")
     except FileNotFoundError:
         if not records:
             alerts.append("calendar mirror: no state file - it has never completed")
     except OSError:
         alerts.append("calendar mirror: could not read the mirror state")
+
+    alerts.extend(publisher_alerts(newest, Path(args.publish_state), now,
+                                   dt.timedelta(hours=args.feed_max_hours)))
 
     # Deep verify, at most once a day.
     today = now.date().isoformat()

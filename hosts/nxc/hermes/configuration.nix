@@ -335,6 +335,15 @@ let
     export PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils ]}
     exec ${calendarPython}/bin/python3 ${familyCalendarSource}/caldav_mirror.py "$@"
   '';
+  # The watchdog is a Hermes cron job, not a systemd timer, because its alerts
+  # are delivered through Hermes rather than through Home Assistant. It is on
+  # PATH so the job does not have to name a store path that changes on every
+  # rebuild.
+  caldavWatchdog = pkgs.writeShellScriptBin "caldav-family-watchdog" ''
+    export PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils ]}:${caldavMirror}/bin
+    export HERMES_HOME=/var/lib/hermes/.hermes
+    exec ${calendarPython}/bin/python3 ${familyCalendarSource}/caldav_watchdog.py "$@"
+  '';
   # One feed→collection pair per line, all seven enabled. The trial
   # `spike-family` pair that ran the migration is gone; the collection itself is
   # left in place, unmirrored, until the fallback window closes on 2026-12-16;
@@ -620,6 +629,7 @@ in
   };
 
   environment.systemPackages = with pkgs; [
+    caldavWatchdog
     claudeCodeForHermes
     pkgs-unstable.codex
     opencode-v2
