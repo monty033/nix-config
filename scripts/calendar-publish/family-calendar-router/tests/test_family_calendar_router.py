@@ -630,5 +630,144 @@ class HeartbeatTests(unittest.TestCase):
         import json
         self.assertEqual(json.loads((self.dir / "heartbeat.json").read_text())["events"], 9)
 
+class UnchangedPublishTests(unittest.TestCase):
+    """A publish that changes nothing must not touch a single file or deploy."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self._patches = [
+            patch.object(router, "OUTPUT_DIR", str(self.dir)),
+            patch.object(router, "PUBLISH_STATE_DIR", str(self.dir / "state")),
+            patch.object(router, "HA_TARGET", "ha.example:/config/www/calendars"),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        self._tmp.cleanup()
+
+    def test_identical_content_is_not_rewritten(self):
+        path = self.dir / "family.ics"
+        self.assertTrue(router.write_if_changed(str(path), "BEGIN:VCALENDAR\n"))
+        before = path.stat().st_mtime_ns
+        self.assertFalse(router.write_if_changed(str(path), "BEGIN:VCALENDAR\n"))
+        self.assertEqual(path.stat().st_mtime_ns, before)
+
+    def test_changed_content_is_replaced_without_a_temp_file(self):
+        path = self.dir / "family.ics"
+        router.write_if_changed(str(path), "one")
+        self.assertTrue(router.write_if_changed(str(path), "two"))
+        self.assertEqual(path.read_text(), "two")
+        self.assertFalse((self.dir / "family.ics.tmp").exists())
+
+    def test_write_creates_missing_files(self):
+        path = self.dir / "never-written.ics"
+        self.assertTrue(router.write_if_changed(str(path), "x"))
+        self.assertEqual(path.read_text(), "x")
+
+    def run_main(self, deploys):
+        """Run main() twice with fixed upstreams; return the deploy calls."""
+        events = [{"summary": "#patrick Dentist", "start": datetime(2026, 12, 1, 15, 0,
+                   tzinfo=timezone.utc), "end": datetime(2026, 12, 1, 16, 0,
+                   tzinfo=timezone.utc), "source": "proton", "all_day": False},
+                  # The school feed must route at least one event into the family
+                  # calendar, or main() refuses before writing anything.
+                  {"summary": "#family Early Dismissal", "start": datetime(2026, 12, 3, 12, 0,
+                   tzinfo=timezone.utc), "end": datetime(2026, 12, 3, 13, 0,
+                   tzinfo=timezone.utc), "source": "school", "all_day": False}]
+        with patch.object(router, "fetch_proton", return_value=events), \
+             patch.object(router, "fetch_google", return_value=[]), \
+             patch.object(router, "fetch_school", return_value=events), \
+             patch.object(router, "scp_to_ha", side_effect=lambda o: deploys.append("ha") or True), \
+             patch.object(router, "scp_school_to_public",
+                          side_effect=lambda f: deploys.append("school") or True), \
+             patch("sys.stderr", new=io.StringIO()):
+            first = router.main()
+            second = router.main()
+        return first, second
+
+    def test_first_publish_deploys_and_the_second_does_not(self):
+        deploys = []
+        first, second = self.run_main(deploys)
+        self.assertEqual(first, 0)
+        self.assertEqual(second, 0)
+        # Once for the pair feeds and once for the school feed, on the first run
+        # only: the second run finds identical bytes.
+        self.assertEqual(deploys, ["ha", "school"])
+        # The heartbeat is the watchdog's only liveness signal, so it must be
+        # written even on a run that wrote and deployed nothing.
+        self.assertTrue((self.dir / "state" / "heartbeat.json").exists())
+
+    def test_a_changed_event_deploys_again(self):
+        deploys = []
+        self.run_main(deploys)
+        deploys.clear()
+        moved = [{"summary": "#patrick Dentist", "start": datetime(2026, 12, 2, 15, 0,
+                  tzinfo=timezone.utc), "end": datetime(2026, 12, 2, 16, 0,
+                  tzinfo=timezone.utc), "source": "proton", "all_day": False},
+                 {"summary": "#family Early Dismissal", "start": datetime(2026, 12, 3, 12, 0,
+                  tzinfo=timezone.utc), "end": datetime(2026, 12, 3, 13, 0,
+                  tzinfo=timezone.utc), "source": "school", "all_day": False}]
+        with patch.object(router, "fetch_proton", return_value=moved), \
+             patch.object(router, "fetch_google", return_value=[]), \
+             patch.object(router, "fetch_school", return_value=moved), \
+             patch.object(router, "scp_to_ha", side_effect=lambda o: deploys.append("ha") or True), \
+             patch.object(router, "scp_school_to_public",
+                          side_effect=lambda f: deploys.append("school") or True), \
+             patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(router.main(), 0)
+        self.assertIn("ha", deploys)
+        self.assertIn("school", deploys)
+
+    def test_a_failed_deploy_is_retried_on_the_next_run(self):
+        """The files are already written when the deploy fails, so retrying
+        cannot rely on "something changed" — it relies on the marker."""
+        deploys = []
+        events = [{"summary": "#patrick Dentist", "start": datetime(2026, 12, 1, 15, 0,
+                   tzinfo=timezone.utc), "end": datetime(2026, 12, 1, 16, 0,
+                   tzinfo=timezone.utc), "source": "proton", "all_day": False},
+                  {"summary": "#family Early Dismissal", "start": datetime(2026, 12, 3, 12, 0,
+                   tzinfo=timezone.utc), "end": datetime(2026, 12, 3, 13, 0,
+                   tzinfo=timezone.utc), "source": "school", "all_day": False}]
+        attempts = {"ha": 0}
+
+        def flaky_ha(outputs):
+            attempts["ha"] += 1
+            deploys.append("ha")
+            return attempts["ha"] > 1  # fails the first time
+
+        with patch.object(router, "fetch_proton", return_value=events), \
+             patch.object(router, "fetch_google", return_value=[]), \
+             patch.object(router, "fetch_school", return_value=events), \
+             patch.object(router, "scp_to_ha", side_effect=flaky_ha), \
+             patch.object(router, "scp_school_to_public",
+                          side_effect=lambda f: deploys.append("school") or True), \
+             patch("sys.stderr", new=io.StringIO()):
+            first = router.main()
+            second = router.main()
+        self.assertEqual(first, 1, "the failed deploy must fail the run")
+        self.assertEqual(second, 0)
+        self.assertEqual(deploys.count("ha"), 2, "the second run must retry HA")
+        # Once the retry lands, a third unchanged run has nothing to send.
+        deploys.clear()
+        with patch.object(router, "fetch_proton", return_value=events), \
+             patch.object(router, "fetch_google", return_value=[]), \
+             patch.object(router, "fetch_school", return_value=events), \
+             patch.object(router, "scp_to_ha", side_effect=lambda o: deploys.append("ha") or True), \
+             patch.object(router, "scp_school_to_public",
+                          side_effect=lambda f: deploys.append("school") or True), \
+             patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(router.main(), 0)
+        self.assertEqual(deploys, [], "a settled deploy must not repeat")
+
+    def test_a_deploy_marker_round_trips(self):
+        self.assertEqual(router.deploy_marker("ha"), "")
+        router.record_deploy("ha", "abc123")
+        self.assertEqual(router.deploy_marker("ha"), "abc123")
+
+
 if __name__ == "__main__":
     unittest.main()
