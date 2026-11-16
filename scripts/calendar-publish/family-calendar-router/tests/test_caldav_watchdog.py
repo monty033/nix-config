@@ -250,7 +250,9 @@ class CanaryTests(WatchdogCase):
     def test_present_canary_is_silent(self):
         lines, calls = self.run_with_canary()
         self.assertEqual(lines, [])
-        self.assertEqual(calls, [("CANARY #family", "spike-family")])
+        # The default target is the production family calendar now that the
+        # trial pair is retired.
+        self.assertEqual(calls, [("CANARY #family", "family")])
 
     def test_missing_canary_alerts(self):
         lines, _ = self.run_with_canary(found=False)
