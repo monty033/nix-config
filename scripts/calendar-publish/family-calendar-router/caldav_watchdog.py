@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="rotate the failure spool above this size")
     parser.add_argument("--canary-summary",
                         help="summary of one event that must survive the path")
-    parser.add_argument("--canary-collection", default="spike-family")
+    parser.add_argument("--canary-collection", default="family")
     parser.add_argument("--now", help="override the clock (tests)")
     args = parser.parse_args(argv)
 

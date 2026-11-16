@@ -335,18 +335,12 @@ let
     export PATH=${pkgs.lib.makeBinPath [ pkgs.coreutils ]}
     exec ${calendarPython}/bin/python3 ${familyCalendarSource}/caldav_mirror.py "$@"
   '';
-  # One feed→collection pair per line. Only the spike pair is enabled until the
-  # production collections exist (calendar-caldav-migration.md stage 2); the
-  # rest are declared here so enabling one is a one-word change.
+  # One feed→collection pair per line, all seven enabled. The trial
+  # `spike-family` pair that ran the migration is gone; the collection itself is
+  # left in place, unmirrored, until the fallback window closes on 2026-12-16;
+  # its 31 resources are then deleted with the rest of the decommission.
   caldavPairs = pkgs.writeText "caldav-mirror-pairs.json" (builtins.toJSON {
     pairs = [
-      # The same feed appears twice: the trial calendar and the production one.
-      # Both stay enabled until the dashboards are moved onto the production
-      # entities; the trial pair is removed in the follow-up change. Keeping it
-      # enabled in the meantime means the kiosk never reads a calendar that has
-      # stopped updating.
-      { feed = "/var/lib/hermes/.hermes/workspace/calendars/family.ics"; collection = "spike-family";
-        enabled = true; create_calendar = true; }
       # Production pairs: the seven collections exist and are current, created
       # by a one-off run that passed `--create-calendar`. They carry no
       # `create_calendar` here, so a mistyped collection name is refused with
