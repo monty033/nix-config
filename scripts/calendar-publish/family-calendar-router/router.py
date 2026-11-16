@@ -461,6 +461,49 @@ def write_heartbeat(counts: dict[str, int], outputs: dict[str, str]) -> str:
     return path
 
 
+def failure_reason(exc: BaseException) -> str:
+    """A short reason for a failed fetch, with nothing secret in it.
+
+    The message of a fetch error can carry the whole URL, and the URL is the
+    credential for an iCal feed, so only a code is kept.
+    """
+    text = str(exc)
+    match = re.search(r"HTTP (\d{3})", text)
+    if match:
+        return f"HTTP {match.group(1)}"
+    if "secret file" in text:
+        return "credential unavailable"
+    if "not an iCalendar" in text:
+        return "not an iCalendar document"
+    return type(exc).__name__
+
+
+def record_fetch_failure(source: str, exc: BaseException) -> None:
+    """Say why the last run died, so the watchdog can name it."""
+    path = os.path.join(PUBLISH_STATE_DIR, "last-failure.json")
+    payload = {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source,
+        "detail": failure_reason(exc),
+    }
+    tmp = path + ".tmp"
+    try:
+        os.makedirs(PUBLISH_STATE_DIR, exist_ok=True)
+        with open(tmp, "w") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError as exc:
+        # Losing the reason must not replace the reason we are reporting.
+        print(f"WARNING: could not record the fetch failure: {exc}", file=sys.stderr)
+
+
+def clear_fetch_failure() -> None:
+    try:
+        os.unlink(os.path.join(PUBLISH_STATE_DIR, "last-failure.json"))
+    except OSError:
+        pass
+
+
 def write_school_output(events: list[dict], changed: list[str] | None = None) -> str:
     """Write the filtered school calendar used by the public publication."""
     output_dir = OUTPUT_DIR or os.path.expanduser("~/.hermes/workspace/calendars")
@@ -895,6 +938,7 @@ def main():
         proton_events = fetch_proton()
     except RuntimeError as exc:
         print(f"ERROR: Proton fetch failed: {exc}", file=sys.stderr)
+        record_fetch_failure("proton", exc)
         return 1
     print(f"  Proton: {len(proton_events)} events", file=sys.stderr)
 
@@ -902,10 +946,18 @@ def main():
         google_events = fetch_google()
     except RuntimeError as exc:
         print(f"ERROR: Google fetch failed: {exc}", file=sys.stderr)
+        record_fetch_failure("google", exc)
         return 1
     print(f"  Google: {len(google_events)} events", file=sys.stderr)
 
-    school_events = fetch_school()
+    try:
+        school_events = fetch_school()
+    except Exception as exc:
+        # str(CalledProcessError) is the whole command line, which can hold a
+        # token, so the log gets the same short reason the state file does.
+        print(f"ERROR: School fetch failed: {failure_reason(exc)}", file=sys.stderr)
+        record_fetch_failure("school", exc)
+        raise
     print(f"  School: {len(school_events)} events", file=sys.stderr)
 
     all_events = proton_events + google_events + school_events
@@ -987,6 +1039,7 @@ def main():
 
     # The run is only "done" once the files are written and the deploys have
     # passed, so the heartbeat sits after both.
+    clear_fetch_failure()
     try:
         print(f"Heartbeat: {write_heartbeat(counts, outputs)}", file=sys.stderr)
     except OSError as exc:

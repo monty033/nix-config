@@ -166,9 +166,45 @@ def heartbeat_stamp(path: Path) -> dt.datetime | None:
     return stamp if stamp.tzinfo is not None else None
 
 
+SOURCE_LABELS = {"proton": "Proton", "google": "Google", "school": "the school feed"}
+
+
+def fetch_failure(publish_state: Path) -> tuple[dt.datetime, str, str] | None:
+    """The publisher's own account of the run that died, if it left one.
+
+    It sits beside the heartbeat, which is passed in as a file path.
+    """
+    try:
+        payload = json.loads((publish_state.parent / "last-failure.json").read_text())
+        stamp = dt.datetime.fromisoformat(payload["at"])
+        source = str(payload["source"])
+        detail = str(payload["detail"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return (stamp, source, detail) if stamp.tzinfo is not None else None
+
+
+def failure_line(publish_state: Path, since: dt.datetime, now: dt.datetime) -> str | None:
+    """Name the cause when the failing run recorded one.
+
+    A rate limit, a bad credential and a crash all look identical from the
+    outside: no heartbeat. The publisher writes down why it stopped, so the
+    alert can say "HTTP 429" instead of leaving Patrick to go and look.
+    """
+    failure = fetch_failure(publish_state)
+    if failure is None or failure[0] < since:
+        return None
+    # A run that died without recording anything after a recorded failure will
+    # still show the older cause. Blunter than a guess, but never silent.
+    _, source, detail = failure
+    label = SOURCE_LABELS.get(source, source)
+    hours = max(0, int((now - since).total_seconds() // 3600))
+    return f"calendar publisher: {label} fetch failing ({detail}) — no successful publish for {hours} h"
+
+
 def publisher_alerts(newest: dt.datetime | None, publish_state: Path,
                      now: dt.datetime, feed_max: dt.timedelta) -> list[str]:
-    """Is the publisher still publishing?
+    """Is the publisher still publishing, and if not, why?
 
     The heartbeat is the signal, not feed age: since an unchanged publish no
     longer rewrites anything, a quiet feed file can mean a healthy publisher
@@ -184,17 +220,21 @@ def publisher_alerts(newest: dt.datetime | None, publish_state: Path,
         age = now - stamp
         if age <= feed_max:
             return []
-        return [f"calendar publisher: no successful publish for "
-                f"{max(0, int(age.total_seconds() // 3600))} h"]
+        return [failure_line(publish_state, stamp, now)
+                or f"calendar publisher: no successful publish for "
+                   f"{max(0, int(age.total_seconds() // 3600))} h"]
 
     # No heartbeat to read: fall back to the newest feed, which the old build
     # rewrote on every run.
     if newest is None:
+        # Nothing to measure a failure against, so the generic line stands.
         return ["calendar publisher: there are no feed files to publish from"]
     if now - newest <= feed_max:
         return []
-    return [f"calendar publisher: the feeds are {int((now - newest).total_seconds() // 3600)} h old"
-            " and there is no readable heartbeat"]
+    generic = (f"calendar publisher: the feeds are "
+               f"{int((now - newest).total_seconds() // 3600)} h old"
+               " and there is no readable heartbeat")
+    return [failure_line(publish_state, newest, now) or generic]
 
 
 DUPLICATE_WINDOW = 90  # seconds
