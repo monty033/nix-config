@@ -27,7 +27,7 @@ PROVIDER_COLORS = {
     # re-enable: restore these entries and the fetch_data() filter below.
     # "codex": "#10b981",     # emerald (will be overridden per window)
     "claude": "#f59e0b",      # orange (will be overridden per window)
-    "minimax": "#fbbf24",     # amber (5h only; weekly is filtered out)
+    "minimax": "#f472b6",     # pink (5h only; weekly is filtered out)
     "opencodeGo": "#3b82f6",  # blue (base, overridden per window below)
 }
 
@@ -40,7 +40,7 @@ WINDOW_OVERRIDES = {
     ("opencodeGo", "5h"):     ("#93c5fd", "-",  "o"),    # light blue, solid
     ("opencodeGo", "weekly"): ("#3b82f6", "--", "s"),    # medium blue, dashed
     ("opencodeGo", "monthly"):("#1e40af", ":",  "^"),    # dark blue, dotted
-    ("minimax", "5h"):    ("#fbbf24", "-",  "P"),      # amber, solid, plus marker
+    ("minimax", "5h"):    ("#f472b6", "-",  "P"),      # pink, solid, plus marker
 }
 
 # Group by provider, keeping each provider's windows adjacent: claude (5h then
