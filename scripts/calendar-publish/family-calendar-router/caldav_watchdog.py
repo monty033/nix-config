@@ -153,35 +153,49 @@ def newest_feed(calendars: Path) -> dt.datetime | None:
     return dt.datetime.fromtimestamp(max(times), dt.timezone.utc)
 
 
-def heartbeat_age(path: Path, now: dt.datetime) -> str:
-    """A short phrase describing the publisher's last success, for alert text."""
+def heartbeat_stamp(path: Path) -> dt.datetime | None:
+    """When the publisher last finished a run, or None if it cannot be read.
+
+    A timestamp without a timezone is treated as unreadable rather than guessed
+    at: a wrong guess would either hide a dead publisher or invent one.
+    """
     try:
         payload = json.loads(path.read_text())
         stamp = dt.datetime.fromisoformat(payload["last_success"])
     except (OSError, ValueError, KeyError, TypeError):
-        return " and there is no readable heartbeat"
-    if stamp.tzinfo is None:
-        # A timestamp without a zone is not something to guess at.
-        return " and its heartbeat has no timezone"
-    return f"; the last successful run was {max(0, int((now - stamp).total_seconds() // 60))} min ago"
+        return None
+    return stamp if stamp.tzinfo is not None else None
 
 
 def publisher_alerts(newest: dt.datetime | None, publish_state: Path,
                      now: dt.datetime, feed_max: dt.timedelta) -> list[str]:
     """Is the publisher still publishing?
 
-    Feed age, not state age: the mirror only writes state when it changes
-    something, so an idle mirror would otherwise look dead. One line only, so a
-    dead publisher cannot alert twice.
+    The heartbeat is the signal, not feed age: since an unchanged publish no
+    longer rewrites anything, a quiet feed file can mean a healthy publisher
+    with nothing to say. Feed age is only a fallback for a host whose publisher
+    predates the heartbeat. One line, so a dead publisher cannot alert twice.
     """
+    stamp = heartbeat_stamp(publish_state)
+    if stamp is not None and now - stamp < dt.timedelta(minutes=-5):
+        # More than five minutes in the future is clock skew, not liveness, so
+        # it is not trusted either way; fall through to the fallback.
+        stamp = None
+    if stamp is not None:
+        age = now - stamp
+        if age <= feed_max:
+            return []
+        return [f"calendar publisher: no successful publish for "
+                f"{max(0, int(age.total_seconds() // 3600))} h"]
+
+    # No heartbeat to read: fall back to the newest feed, which the old build
+    # rewrote on every run.
     if newest is None:
-        # No feed file at all: a wiped or never-written directory.
         return ["calendar publisher: there are no feed files to publish from"]
     if now - newest <= feed_max:
         return []
-    hours = int((now - newest).total_seconds() // 3600)
-    return [f"calendar publisher: the feeds are {hours} h old"
-            f"{heartbeat_age(publish_state, now)}"]
+    return [f"calendar publisher: the feeds are {int((now - newest).total_seconds() // 3600)} h old"
+            " and there is no readable heartbeat"]
 
 
 DUPLICATE_WINDOW = 90  # seconds

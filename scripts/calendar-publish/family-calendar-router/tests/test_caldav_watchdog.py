@@ -202,35 +202,36 @@ class FreshnessTests(WatchdogCase):
         self.write_state(minutes_ago=11)
         self.assertEqual(self._run(), [])
 
-    def test_old_feeds_mean_the_publisher_stopped(self):
-        self.write_state(minutes_ago=600)
+    def test_an_old_heartbeat_means_the_publisher_stopped(self):
         self.write_feed(minutes_ago=600)
+        self.write_heartbeat(minutes_ago=600)
         lines = self._run()
-        self.assertTrue(any("calendar publisher: the feeds are 10 h old" in line
-                            for line in lines))
+        self.assertTrue(any("no successful publish for 10 h" in line for line in lines))
 
-    def test_old_feeds_name_the_last_success_from_the_heartbeat(self):
+    def test_a_fresh_heartbeat_is_silent_even_with_old_feeds(self):
+        # An unchanged publish no longer rewrites the files, so an old feed with
+        # a fresh heartbeat is a healthy, quiet pipeline.
         self.write_feed(minutes_ago=600)
-        self.write_heartbeat(minutes_ago=630)
-        line = next(l for l in self._run() if "publisher" in l)
-        self.assertIn("last successful run was 630 min ago", line)
+        self.write_heartbeat(minutes_ago=5)
+        self.assertEqual(self._run(), [])
 
-    def test_old_feeds_without_a_heartbeat_say_so(self):
+    def test_old_feeds_without_a_heartbeat_fall_back_to_feed_age(self):
         self.write_feed(minutes_ago=600)
         line = next(l for l in self._run() if "publisher" in l)
+        self.assertIn("the feeds are 10 h old", line)
         self.assertIn("no readable heartbeat", line)
 
     def test_a_quiet_mirror_is_not_a_dead_publisher(self):
-        # The mirror only saves state when it changes something, so an old
-        # state file with fresh feeds is a quiet afternoon, not a failure.
+        # The mirror only saves state when it changes something.
         self.write_state(minutes_ago=150)
         self.write_feed(minutes_ago=140)
         self.assertEqual(self._run(), [])
 
-    def test_fresh_feeds_with_an_old_heartbeat_stay_silent(self):
-        self.write_feed(minutes_ago=5)
-        self.write_heartbeat(minutes_ago=200)
-        self.assertEqual(self._run(), [])
+    def test_a_heartbeat_without_a_timezone_is_not_trusted(self):
+        self.publish_state.write_text('{"last_success": "2026-11-16T06:00:00"}')
+        self.write_feed(minutes_ago=600)
+        line = next(l for l in self._run() if "publisher" in l)
+        self.assertIn("no readable heartbeat", line)
 
     def test_missing_state_is_reported(self):
         self.state.unlink()
@@ -400,7 +401,7 @@ class PublisherSignalTests(WatchdogCase):
         self.publish_state.write_text('{"last_success": "2026-11-16T06:00:00"}')
         self.write_feed(minutes_ago=600)
         line = next(l for l in self.run_watchdog() if "publisher" in l)
-        self.assertIn("no timezone", line)
+        self.assertIn("no readable heartbeat", line)
 
 
 if __name__ == "__main__":

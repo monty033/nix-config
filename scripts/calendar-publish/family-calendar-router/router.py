@@ -351,7 +351,70 @@ def generate_ical(calendar_name: str, events: list[dict]) -> str:
     return cal.to_ical().decode("utf-8")
 
 
-def write_outputs(calendars: dict[str, list[dict]]) -> dict[str, str]:
+def write_if_changed(path: str, content: str) -> bool:
+    """Write a file atomically, and not at all when the bytes already match.
+
+    Every publish used to rewrite all eight feeds, which re-triggered the
+    mirror's path unit and both deploys for no reason. Comparing first makes an
+    unchanged publish a genuine no-op. A real write goes to a temporary name and
+    is renamed into place, so a reader never sees half a file.
+    Returns True when the file was (re)written.
+    """
+    data = content.encode("utf-8")
+    try:
+        with open(path, "rb") as handle:
+            if handle.read() == data:
+                return False
+    except OSError:
+        pass  # missing or unreadable: write it
+    tmp = f"{path}.tmp"
+    try:
+        with open(tmp, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        # Leave nothing half-written behind for the mirror or a reader to find.
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return True
+
+
+def outputs_fingerprint(paths: list[str]) -> str:
+    """One hash over the exact bytes of every file a deploy would send."""
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        digest.update(os.path.basename(path).encode("utf-8") + b"\0")
+        with open(path, "rb") as handle:
+            digest.update(handle.read())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def deploy_marker(target: str) -> str:
+    """The fingerprint of what the last successful deploy to this remote sent."""
+    try:
+        with open(os.path.join(PUBLISH_STATE_DIR, f"deployed-{target}.txt")) as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
+
+
+def record_deploy(target: str, fingerprint: str) -> None:
+    os.makedirs(PUBLISH_STATE_DIR, exist_ok=True)
+    path = os.path.join(PUBLISH_STATE_DIR, f"deployed-{target}.txt")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as handle:
+        handle.write(fingerprint + "\n")
+    os.replace(tmp, path)
+
+
+def write_outputs(calendars: dict[str, list[dict]],
+                  changed: list[str] | None = None) -> dict[str, str]:
     """Write iCal files to OUTPUT_DIR. Returns {name: filepath}."""
     output_dir = OUTPUT_DIR or os.path.expanduser("~/.hermes/workspace/calendars")
     os.makedirs(output_dir, exist_ok=True)
@@ -361,8 +424,8 @@ def write_outputs(calendars: dict[str, list[dict]]) -> dict[str, str]:
         events = calendars.get(name, [])
         ical_str = generate_ical(name, events)
         filepath = os.path.join(output_dir, f"{name}.ics")
-        with open(filepath, "w") as f:
-            f.write(ical_str)
+        if write_if_changed(filepath, ical_str) and changed is not None:
+            changed.append(name)
         outputs[name] = filepath
 
     return outputs
@@ -398,13 +461,13 @@ def write_heartbeat(counts: dict[str, int], outputs: dict[str, str]) -> str:
     return path
 
 
-def write_school_output(events: list[dict]) -> str:
+def write_school_output(events: list[dict], changed: list[str] | None = None) -> str:
     """Write the filtered school calendar used by the public publication."""
     output_dir = OUTPUT_DIR or os.path.expanduser("~/.hermes/workspace/calendars")
     os.makedirs(output_dir, exist_ok=True)
     filepath = os.path.join(output_dir, "school.ics")
-    with open(filepath, "w") as f:
-        f.write(generate_ical("school", events))
+    if write_if_changed(filepath, generate_ical("school", events)) and changed is not None:
+        changed.append("school")
     return filepath
 
 
@@ -882,26 +945,45 @@ def main():
 
     # Generate iCal files
     print("Generating iCal files...", file=sys.stderr)
-    outputs = write_outputs(calendars)
-    school_output = write_school_output(school_calendar)
+    changed: list[str] = []
+    outputs = write_outputs(calendars, changed)
+    school_output = write_school_output(school_calendar, changed)
     for name, path in outputs.items():
         size = os.path.getsize(path)
-        print(f"  {name}.ics  {size:6} bytes", file=sys.stderr)
-    print(f"  school.ics {os.path.getsize(school_output):6} bytes", file=sys.stderr)
+        mark = "" if name in changed else "  (unchanged)"
+        print(f"  {name}.ics  {size:6} bytes{mark}", file=sys.stderr)
+    print(f"  school.ics {os.path.getsize(school_output):6} bytes"
+          f"{'' if 'school' in changed else '  (unchanged)'}", file=sys.stderr)
+    print(f"  changed: {len(changed)} of {len(outputs) + 1} files", file=sys.stderr)
+
+    # A deploy is skipped only when both are true: no file changed, and the
+    # remote already holds exactly this content. Keying on "changed" alone would
+    # lose a failed deploy for ever, because the next run would see the files it
+    # had just written and skip the retry.
+    fingerprint = outputs_fingerprint(list(outputs.values()) + [school_output])
+    need_ha = bool(HA_TARGET) and (bool(changed) or deploy_marker("ha") != fingerprint)
+    need_school = bool(changed) or deploy_marker("school") != fingerprint
+    if not need_ha and not need_school:
+        print(file=sys.stderr)
+        print("Nothing changed and both remotes are current; skipping both deploys.",
+              file=sys.stderr)
 
     # Deploy to HA
-    if HA_TARGET:
+    if need_ha:
         print(file=sys.stderr)
         print("Deploying to HA...", file=sys.stderr)
         if scp_to_ha(outputs):
             print("  Done.", file=sys.stderr)
+            record_deploy("ha", fingerprint)
         else:
             print("  Failed.", file=sys.stderr)
             return 1
 
-    print("\nPublishing school calendar to Bifrost...", file=sys.stderr)
-    if not scp_school_to_public(school_output):
-        return 1
+    if need_school:
+        print("\nPublishing school calendar to Bifrost...", file=sys.stderr)
+        if not scp_school_to_public(school_output):
+            return 1
+        record_deploy("school", fingerprint)
 
     # The run is only "done" once the files are written and the deploys have
     # passed, so the heartbeat sits after both.
