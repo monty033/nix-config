@@ -251,7 +251,7 @@
     # is the only thing on the network permitted to read switch state, so what
     # runs is exactly what was reviewed, not whatever main happens to be.
     heimdall = {
-      url = "git+https://git.montycasa.net/patrick/heimdall?rev=02c6d871a6aadf10e321602bb2bf9abd6cf745de";
+      url = "git+https://git.montycasa.net/patrick/heimdall?rev=cde2356dfa89a1cdca3f2aa767da477ca4349857";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
