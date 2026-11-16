@@ -28,6 +28,7 @@ class WatchdogCase(unittest.TestCase):
         self.state = self.tmp / "state.json"
         self.spool = self.tmp / "failures.jsonl"
         self.cursor = self.tmp / "watchdog.json"
+        self.publish_state = self.tmp / "heartbeat.json"
         self.write_state(minutes_ago=1)
         self.write_feed(minutes_ago=2)
 
@@ -47,6 +48,13 @@ class WatchdogCase(unittest.TestCase):
         import os
         os.utime(path, (stamp, stamp))
 
+    def write_heartbeat(self, minutes_ago=1):
+        stamp = self.NOW - timedelta(minutes=minutes_ago)
+        self.publish_state.write_text(json.dumps({
+            "last_success": stamp.isoformat(timespec="seconds"),
+            "calendars": 7, "events": 100, "files": {},
+        }))
+
     def record(self, code, **extra):
         row = {"at": "2026-11-15T11:59:00+00:00", "unit": "calendar-caldav-mirror",
                "code": code, "pairs": 7, "failed": 1, "empty": 0}
@@ -61,6 +69,8 @@ class WatchdogCase(unittest.TestCase):
         buffer = io.StringIO()
         argv = ["--spool", str(self.spool), "--state", str(self.state),
                 "--calendars", str(self.calendars), "--cursor", str(self.cursor),
+                "--publish-state", str(self.publish_state),
+                "--publish-state", str(self.publish_state),
                 "--now", (now or self.NOW).isoformat(), "--no-verify", *extra]
         with contextlib.redirect_stdout(buffer):
             code = watchdog.main(argv)
@@ -192,15 +202,39 @@ class FreshnessTests(WatchdogCase):
         self.write_state(minutes_ago=11)
         self.assertEqual(self._run(), [])
 
-    def test_no_run_for_two_hours_is_reported(self):
+    def test_old_feeds_mean_the_publisher_stopped(self):
+        self.write_state(minutes_ago=600)
+        self.write_feed(minutes_ago=600)
+        lines = self._run()
+        self.assertTrue(any("calendar publisher: the feeds are 10 h old" in line
+                            for line in lines))
+
+    def test_old_feeds_name_the_last_success_from_the_heartbeat(self):
+        self.write_feed(minutes_ago=600)
+        self.write_heartbeat(minutes_ago=630)
+        line = next(l for l in self._run() if "publisher" in l)
+        self.assertIn("last successful run was 630 min ago", line)
+
+    def test_old_feeds_without_a_heartbeat_say_so(self):
+        self.write_feed(minutes_ago=600)
+        line = next(l for l in self._run() if "publisher" in l)
+        self.assertIn("no readable heartbeat", line)
+
+    def test_a_quiet_mirror_is_not_a_dead_publisher(self):
+        # The mirror only saves state when it changes something, so an old
+        # state file with fresh feeds is a quiet afternoon, not a failure.
         self.write_state(minutes_ago=150)
         self.write_feed(minutes_ago=140)
-        lines = self._run()
-        self.assertTrue(any("no successful run" in line for line in lines))
+        self.assertEqual(self._run(), [])
+
+    def test_fresh_feeds_with_an_old_heartbeat_stay_silent(self):
+        self.write_feed(minutes_ago=5)
+        self.write_heartbeat(minutes_ago=200)
+        self.assertEqual(self._run(), [])
 
     def test_missing_state_is_reported(self):
         self.state.unlink()
-        lines = self._run()
+        lines = self.run_watchdog()
         self.assertTrue(any("never completed" in line for line in lines))
 
 
@@ -344,6 +378,29 @@ class VerifyTests(WatchdogCase):
             watchdog.run_verify = original
         self.assertIn("daily deep check the calendar still differs from the feed",
                       buffer.getvalue())
+
+
+class PublisherSignalTests(WatchdogCase):
+    """The publisher's check must not depend on the mirror having a state file."""
+
+    def test_no_state_file_still_reports_a_dead_publisher(self):
+        self.state.unlink()
+        self.write_feed(minutes_ago=600)
+        lines = self.run_watchdog()
+        self.assertTrue(any("never completed" in line for line in lines))
+        self.assertTrue(any("the feeds are 10 h old" in line for line in lines))
+
+    def test_an_empty_calendars_directory_is_reported(self):
+        for feed in self.calendars.glob("*.ics"):
+            feed.unlink()
+        lines = self.run_watchdog()
+        self.assertTrue(any("no feed files" in line for line in lines))
+
+    def test_a_heartbeat_without_a_timezone_is_reported(self):
+        self.publish_state.write_text('{"last_success": "2026-11-16T06:00:00"}')
+        self.write_feed(minutes_ago=600)
+        line = next(l for l in self.run_watchdog() if "publisher" in l)
+        self.assertIn("no timezone", line)
 
 
 if __name__ == "__main__":

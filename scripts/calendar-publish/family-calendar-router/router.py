@@ -17,6 +17,7 @@ Output: 7 iCal files → scp to Home Assistant www/ → HA serves as calendar fe
 import sys
 import os
 import re
+import json
 import hashlib
 import shlex
 import subprocess
@@ -365,6 +366,36 @@ def write_outputs(calendars: dict[str, list[dict]]) -> dict[str, str]:
         outputs[name] = filepath
 
     return outputs
+
+
+# Deliberately outside the calendars directory: the mirror's path unit watches
+# that directory, so a heartbeat written there would start a reconcile on every
+# publish for no reason.
+PUBLISH_STATE_DIR = os.environ.get("CALENDAR_PUBLISH_STATE") or os.path.expanduser(
+    "~/.hermes/workspace/calendar-publish-state"
+)
+
+
+def write_heartbeat(counts: dict[str, int], outputs: dict[str, str]) -> str:
+    """Record a completed publish where the watchdog can find it.
+
+    The mirror only saves its own state when it changes something, so the
+    mirror's state age cannot answer "is the publisher alive". This file can.
+    Written with a temp name and a rename so a reader never sees half of it.
+    """
+    os.makedirs(PUBLISH_STATE_DIR, exist_ok=True)
+    path = os.path.join(PUBLISH_STATE_DIR, "heartbeat.json")
+    payload = {
+        "last_success": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "calendars": len(outputs),
+        "events": sum(counts.values()),
+        "files": {name: os.path.getsize(p) for name, p in outputs.items()},
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+    return path
 
 
 def write_school_output(events: list[dict]) -> str:
@@ -871,6 +902,13 @@ def main():
     print("\nPublishing school calendar to Bifrost...", file=sys.stderr)
     if not scp_school_to_public(school_output):
         return 1
+
+    # The run is only "done" once the files are written and the deploys have
+    # passed, so the heartbeat sits after both.
+    try:
+        print(f"Heartbeat: {write_heartbeat(counts, outputs)}", file=sys.stderr)
+    except OSError as exc:
+        print(f"WARNING: could not write the publish heartbeat: {exc}", file=sys.stderr)
 
     print(file=sys.stderr)
     print(f"Done. {sum(counts.values())} events routed to {len(outputs)} calendars.", file=sys.stderr)

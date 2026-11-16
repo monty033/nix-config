@@ -590,6 +590,45 @@ class FamilyCalendarRouterTests(unittest.TestCase):
 
         return subprocess.CompletedProcess(args, 0)
 
+class HeartbeatTests(unittest.TestCase):
+    """The publisher's liveness signal, read by the watchdog."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name) / "publish-state"
+        self._patch = patch.object(router, "PUBLISH_STATE_DIR", str(self.dir))
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self._tmp.cleanup()
+
+    def write_files(self):
+        files = {}
+        for name in ("family", "patrick"):
+            path = Path(self._tmp.name) / f"{name}.ics"
+            path.write_text("BEGIN:VCALENDAR\nEND:VCALENDAR\n")
+            files[name] = str(path)
+        return files
+
+    def test_records_the_run(self):
+        import json
+        path = router.write_heartbeat({"family": 3, "patrick": 2}, self.write_files())
+        payload = json.loads(Path(path).read_text())
+        self.assertEqual(payload["calendars"], 2)
+        self.assertEqual(payload["events"], 5)
+        self.assertEqual(sorted(payload["files"]), ["family", "patrick"])
+        self.assertTrue(payload["last_success"].endswith("+00:00"))
+
+    def test_leaves_no_temporary_file(self):
+        router.write_heartbeat({"family": 1}, self.write_files())
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["heartbeat.json"])
+
+    def test_rewrites_atomically_over_an_older_one(self):
+        router.write_heartbeat({"family": 1}, self.write_files())
+        router.write_heartbeat({"family": 9}, self.write_files())
+        import json
+        self.assertEqual(json.loads((self.dir / "heartbeat.json").read_text())["events"], 9)
 
 if __name__ == "__main__":
     unittest.main()
