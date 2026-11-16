@@ -33,7 +33,7 @@
       inputs.home-manager.follows = "home-manager";
     };
 
-    # Pinned to the merge of NookBridge #300 (654305e). A note is no longer
+    # Earlier pin 654305e: the merge of NookBridge #300, where a note is no longer
     # refused whole because one block has no Markdown spelling: the codec is
     # asked block by block, and only the block it cannot spell is preserved
     # byte for byte while the rest of the note stays editable. Validation and
@@ -220,7 +220,7 @@
     # non-empty body. The 65,536-byte response frame and its exact JSON byte
     # accounting are unchanged from the previous pin.
     #
-    # `notes.edit-census --handle <handle>` reported `missing` (not_found) for
+    # Earlier pin 7a76299: `notes.edit-census --handle <handle>` reported `missing` (not_found) for
     # a note `notes.search-operator` had just returned a handle for and
     # `notes.get` served, because the scoped census looked the note up only in
     # the visibility listing. The listing is narrower than what the read path
@@ -231,9 +231,16 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     #
-    # This revision is 2 commits after the previous pin (revCount 729 to 731).
+    # The pin before this one (dc89bf7) was 2 commits after its own
+    # predecessor (revCount 729 to 731).
+    #
+    # This revision is 2 commits after the previous pin (revCount 731 to 733)
+    # and is the merge of #307, which changes the lock and visibility decision
+    # in the read-only projection that discovery and `notes.get` both use: a
+    # note with a title and no body is decided by its own signals instead of
+    # being withheld as undecidable.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=dc89bf7eb62277ba7379a9ee403b1c3103cd8679";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=e387cb68093ca042e17bb8ce1c62bd5ada353abe";
       flake = false;
     };
 
