@@ -493,6 +493,15 @@ def resolve(tier: str, entries: list[dict], live: dict[str, list[str]], private:
         if entry["variant"] and entry["variant"] not in live[entry["id"]]:
             steps.append({"id": entry["id"], "cause": "variant", "detail": f"{entry['variant']!r} not offered", "label": label})
             continue
+        if is_free(entry, free_ids):
+            # A free route spends none of the provider's paid allowance, so a spent
+            # or flagged paid window is not evidence it cannot serve this request.
+            # Consulting it anyway strands every free candidate on that provider as
+            # soon as the paid balance empties: on 2026-11-16 both free Go routes were
+            # refused at a 0% monthly window while live requests answered 200.
+            # Availability and variant checks above still apply.
+            return {"ok": True, "entry": entry, "index": index, "total": len(ordered),
+                    "quota": "quota: free route (paid window not consulted)", "steps": steps}
         verdict, text = quota_verdict(quota_snapshot(QUOTA_KEYS.get(provider_of(entry["id"])), cache), entry)
         if verdict == "exhausted":
             steps.append({"id": entry["id"], "cause": "quota", "detail": text, "label": label})
