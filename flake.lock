@@ -256,16 +256,16 @@
     "philly-masters": {
       "flake": false,
       "locked": {
-        "lastModified": 1794852798,
-        "narHash": "sha256-5nkDGSj6lOHH6yiu/+HJaK3J01r/f3COX3hQTpgtoOg=",
+        "lastModified": 1794858182,
+        "narHash": "sha256-G3pXKc5cY8wPPaJqxrVfg/sibJTJUbBY+tux4qiQX2U=",
         "ref": "refs/heads/main",
-        "rev": "d7848607070b7dda509ead0f4bc40b1a0e14025a",
-        "revCount": 127,
+        "rev": "3643d6cfcc7d2f710854c4719aedba44843d6c72",
+        "revCount": 133,
         "type": "git",
         "url": "https://git.montycasa.net/patrick/philly-masters"
       },
       "original": {
-        "rev": "d7848607070b7dda509ead0f4bc40b1a0e14025a",
+        "rev": "3643d6cfcc7d2f710854c4719aedba44843d6c72",
         "type": "git",
         "url": "https://git.montycasa.net/patrick/philly-masters"
       }
