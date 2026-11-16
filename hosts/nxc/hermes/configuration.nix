@@ -1014,12 +1014,19 @@ in
         provider = "minimax";
         model = "MiniMax-M3.1-Flash";
 
+        # The 1M context is what makes Hy4 the right primary for long pages, and
+        # it costs nothing while the promotion lasts. M3.1 on minimax is the
+        # fallback: a different provider, so a Go outage does not take the lane
+        # down with the primary. Same expiry as the vision lane, expected around
+        # 2026-11-30, and the same caveat: the lane either bills at paid rates or
+        # fails over, so the primary must be repointed either way. Lane effort
+        # high applies to that fallback too, rather than the low M3.1 ran before.
         web_extract = {
-          provider = "minimax";
-          model = "MiniMax-M3.1-Flash";
-          reasoning_effort = "low";
+          provider = "opencode-go";
+          model = "hy4-flash-free";
+          reasoning_effort = "high";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.6-flash"; }
+            { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
           ];
         };
 
@@ -1083,14 +1090,22 @@ in
           ];
         };
 
-        # minimax carries vision. Both this route and the MiMo fallback must
-        # pass the post-deploy image smoke.
+        # Vision runs on the free Hy4 flash promotion: image input plus a 1M
+        # context, and no cost while the promo lasts. Both this route and the
+        # M3.1 fallback must pass the post-deploy image smoke. The promotion is
+        # time-limited, announced 2026-11-16 for two weeks, so it is expected to
+        # end around 2026-11-30. Expiry does not fail over on its own: if the
+        # route keeps answering it simply starts billing at the paid rate, and if
+        # it stops the fallback takes over. Either way the primary has to be
+        # repointed, so treat that date as a task rather than a safety net.
+        # Note the lane effort applies to the fallback too, so M3.1 answers here
+        # at high rather than at the low it ran as the previous primary.
         vision = {
-          provider = "minimax";
-          model = "MiniMax-M3.1-Flash";
-          reasoning_effort = "low";
+          provider = "opencode-go";
+          model = "hy4-flash-free";
+          reasoning_effort = "high";
           fallback_chain = [
-            { provider = "opencode-go"; model = "mimo-v2.6-flash"; }
+            { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
           ];
         };
 
