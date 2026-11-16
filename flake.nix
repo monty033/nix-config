@@ -250,7 +250,7 @@
     # convenience, and ./packages/philly-masters.nix builds it against this
     # flake's nixpkgs so a host has one package universe rather than two.
     philly-masters = {
-      url = "git+https://git.montycasa.net/patrick/philly-masters?rev=3643d6cfcc7d2f710854c4719aedba44843d6c72";
+      url = "git+https://git.montycasa.net/patrick/philly-masters?rev=1310655e84a213576e432c886bddfd0bd8586039";
       flake = false;
     };
 
