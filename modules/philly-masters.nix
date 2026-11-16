@@ -4,6 +4,25 @@ let
   cfg = config.extra-services.philly-masters;
   app = pkgs.callPackage ../packages/philly-masters.nix { inherit inputs; };
   stateDir = "/var/lib/philly-masters";
+
+  # What the service actually runs, and the only thing an app release has to
+  # change. The profile is a symlink to a store path; `nix-env --set` moves it,
+  # leaving the previous generations on disk and registered as GC roots. The unit
+  # names the profile, not a version, so the system build does not change when the
+  # application does — and an unrelated rebuild cannot silently roll the app back.
+  #
+  # It is seeded from `cfg.package` when it does not exist, which is what a fresh
+  # host needs; after that, deploys move it and `cfg.package` is only the starting
+  # point — it stays in the system closure as the version a brand new host would
+  # come up on, not necessarily the one running. A `nix flake update` here still
+  # rebuilds the application, but changes nothing on a host that has been deployed.
+  #
+  # Rolling the profile back does NOT undo a migration: a release that changed the
+  # schema leaves the old code running against a newer database. Snapshot the
+  # database before deploying, which scripts/deploy.sh in the application repo
+  # does.
+  profile = "/nix/var/nix/profiles/philly-masters";
+  profileBin = "${profile}/bin/philly-masters-pool";
   # The signing secret is generated here rather than declared, because nobody
   # needs to know it: it keys sessions, so a fresh one costs only a re-login. It
   # lives in the state directory, which survives reinstalls and is not in the
@@ -39,7 +58,14 @@ let
       exit 78
     fi
     export AUTH_SECRET
-    ${cfg.package}/bin/philly-masters-pool
+    # The profile is created by activation on the first switch; if it is missing
+    # here, saying so beats the shell's "No such file or directory".
+    if [ ! -x ${profileBin} ]; then
+      ${pkgs.coreutils}/bin/printf '%s\n' \
+        "philly-masters: ${profileBin} is missing; the profile was not seeded" >&2
+      exit 78
+    fi
+    ${profileBin}
   '';
 in
 {
@@ -50,7 +76,18 @@ in
       type = lib.types.package;
       default = app;
       defaultText = lib.literalExpression "pkgs.callPackage ../packages/philly-masters.nix { inherit inputs; }";
-      description = "The application package the service runs.";
+      description = ''
+        The application version a host comes up on when it has no profile yet, which
+        is its first switch.
+
+        It is set as the profile's first generation by activation and then left
+        alone: the service runs whatever the profile points at, and a deploy moves
+        that. So neither setting this option nor bumping the flake input it defaults
+        from (`nix flake update`) changes a host whose profile already exists,
+        whether that profile was seeded by the first switch or moved by a deploy.
+        Both rebuild the application; the running version only moves on a deploy.
+        That is the point: application releases no longer need a commit here.
+      '';
     };
 
     bindAddress = lib.mkOption {
@@ -124,6 +161,16 @@ in
     systemd.tmpfiles.rules = [
       "d ${stateDir} 0750 philly-masters philly-masters -"
     ];
+
+    # Seed the profile once. Doing it here rather than in the unit means the switch
+    # leaves the host in a state where the service can start, and a host that
+    # already has a deploy is left alone: this never overwrites a version that was
+    # put there by a deploy.
+    system.activationScripts.philly-masters-profile = ''
+      if [ ! -e ${profile} ]; then
+        ${config.nix.package}/bin/nix-env -p ${profile} --set ${cfg.package}
+      fi
+    '';
 
     systemd.services.philly-masters = {
       description = "Philly Masters Pool";
