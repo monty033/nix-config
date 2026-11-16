@@ -152,6 +152,52 @@ class ResolveTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("quota: unknown", result["quota"])
 
+    def test_free_candidate_ignores_spent_paid_window(self):
+        """A spent paid balance is not evidence a free route cannot serve.
+
+        The Go collector reports the paid monthly allowance, and free routes spend
+        none of it. Gating them on that number stranded both free Go candidates at
+        0% while live requests on the same route answered 200 (2026-11-16).
+        """
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0, "resetAtEdt": "Nov 21"}]}
+        result = self.resolve(
+            [entry("opencode-go/hy4-flash-free", "mechanical", 1, free=True)],
+            {"opencode-go/hy4-flash-free": ["high"]}, quota={"opencode-go": spent}, tier="mechanical",
+        )
+        self.assertTrue(result["ok"], "free route must not be refused for a paid window it does not draw on")
+        self.assertEqual(result["entry"]["id"], "opencode-go/hy4-flash-free")
+        self.assertEqual(result["steps"], [])
+        self.assertIn("free", result["quota"])
+
+    def test_free_candidate_ignores_flagged_window_too(self):
+        """A provider flag on the paid window is also not the free route's problem."""
+        flagged = {"status": "ok", "windows": [
+            {"name": "monthly", "remainingPercent": 0, "windowStatus": "throttled", "resetAtEdt": "Nov 21"}]}
+        result = self.resolve(
+            [entry("opencode-go/other-free", "mechanical", 1, free=True)],
+            {"opencode-go/other-free": ["high"]}, quota={"opencode-go": flagged}, tier="mechanical",
+        )
+        self.assertTrue(result["ok"])
+
+    def test_paid_candidate_still_gated_on_spent_window(self):
+        """The exemption must not leak to paid routes sharing the provider."""
+        spent = {"status": "ok", "windows": [{"name": "monthly", "remainingPercent": 0, "resetAtEdt": "Nov 21"}]}
+        result = self.resolve(
+            [entry("opencode-go/paid-one", "slice", 1, free=False)],
+            {"opencode-go/paid-one": ["high"]}, quota={"opencode-go": spent},
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["steps"][0]["cause"], "quota")
+
+    def test_free_candidate_still_needs_catalogue_and_variant(self):
+        """Exempt from the quota gate, not from availability."""
+        result = self.resolve(
+            [entry("opencode-go/hy4-flash-free", "mechanical", 1, free=True)],
+            {"opencode-go/other": ["high"]}, tier="mechanical",
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["steps"][0]["cause"], "absent")
+
     def test_rate_limited_window_is_exhausted_even_at_high_percent(self):
         limited = {"status": "ok", "windows": [{"name": "5h", "remainingPercent": 90, "windowStatus": "rate-limited"}]}
         result = self.resolve([entry("opencode-go/one", "slice", 1)], {"opencode-go/one": ["high"]},
