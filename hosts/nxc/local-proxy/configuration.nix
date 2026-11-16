@@ -72,6 +72,11 @@
         upstream = "192.168.86.135:8043";
       };
 
+      "heimdall.montycasa.net" = {
+        protocol = "http";
+        upstream = "192.168.86.140:9140";
+      };
+
       "router.montycasa.net" = {
         protocol = "http";
         upstream = "192.168.86.1:80";

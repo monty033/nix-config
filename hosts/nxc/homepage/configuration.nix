@@ -411,6 +411,14 @@ in
             };
           }
           {
+            "Heimdall" = {
+              href = "https://heimdall.montycasa.net";
+              siteMonitor = "https://heimdall.montycasa.net";
+              description = "Switch console — ports, links, devices";
+              icon = "mdi-network-outline";
+            };
+          }
+          {
             "Adguard Home" = {
               href = "https://blocker.montycasa.net";
               siteMonitor = "https://blocker.montycasa.net";
