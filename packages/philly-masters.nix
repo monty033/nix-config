@@ -32,11 +32,17 @@ buildNpmPackage rec {
     cp -r build $out/lib/philly-masters-pool/build
     cp package.json $out/lib/philly-masters-pool/package.json
 
+    # The process entry point. It adds an Origin header for a same-origin form post
+    # the browser did not label, then delegates to build/handler.js; run directly,
+    # adapter-node refuses Safari's sign-in posts.
+    cp server.mjs $out/lib/philly-masters-pool/server.mjs
+    cp origin.mjs $out/lib/philly-masters-pool/origin.mjs
+
     mkdir -p $out/lib/philly-masters-pool/migrations
     cp migrations/*.sql $out/lib/philly-masters-pool/migrations/
 
     makeWrapper ${nodejs_24}/bin/node $out/bin/philly-masters-pool \
-      --add-flags "$out/lib/philly-masters-pool/build/index.js" \
+      --add-flags "$out/lib/philly-masters-pool/server.mjs" \
       --set NODE_ENV production \
       --set MIGRATIONS_DIR "$out/lib/philly-masters-pool/migrations"
     runHook postInstall
