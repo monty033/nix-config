@@ -43,10 +43,9 @@ DEFAULT_PAIRS = HERMES_HOME / "workspace/calendar-mirror-state/pairs.json"
 
 # Grace window between a feed being published and the mirror having caught up.
 BEHIND_GRACE = dt.timedelta(minutes=20)
-# The publisher rewrites every feed on every run, so an old feed file means an
-# old publish. Nine hours tolerates one missed four-hourly run plus slack; drop
-# it to about 2.5 h in the change that moves the publish to hourly.
-FEED_MAX_AGE = dt.timedelta(hours=9)
+# The publisher runs hourly and writes a heartbeat on every completed run, so
+# two and a half hours of silence means two missed runs, not a quiet afternoon.
+FEED_MAX_AGE = dt.timedelta(hours=2.5)
 DEFAULT_PUBLISH_STATE = HERMES_HOME / "workspace/calendar-publish-state/heartbeat.json"
 
 # A canary is one event, created by hand, that must survive the whole path.
