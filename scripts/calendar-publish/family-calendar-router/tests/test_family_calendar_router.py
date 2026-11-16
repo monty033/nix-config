@@ -1,5 +1,6 @@
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import tempfile
@@ -762,6 +763,50 @@ class UnchangedPublishTests(unittest.TestCase):
              patch("sys.stderr", new=io.StringIO()):
             self.assertEqual(router.main(), 0)
         self.assertEqual(deploys, [], "a settled deploy must not repeat")
+
+    def test_a_rate_limited_fetch_is_recorded_without_the_url(self):
+        """A 429 must be named for the watchdog, and the feed URL is a secret."""
+        with patch.object(router, "fetch_proton",
+                          side_effect=RuntimeError("HTTP 429 after 4 attempt(s)")), \
+             patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(router.main(), 1)
+        record = json.loads((self.dir / "state" / "last-failure.json").read_text())
+        self.assertEqual(record["source"], "proton")
+        self.assertEqual(record["detail"], "HTTP 429")
+        self.assertIn("at", record)
+        self.assertNotIn("https://", (self.dir / "state" / "last-failure.json").read_text())
+        self.assertNotIn("basic.ics", (self.dir / "state" / "last-failure.json").read_text())
+        self.assertFalse((self.dir / "state" / "heartbeat.json").exists(),
+                         "a failed run must not look like a successful one")
+
+    def test_a_missing_credential_is_named_without_a_path(self):
+        with patch.object(router, "fetch_google",
+                          side_effect=RuntimeError("Google URL secret file not found: /run/x")), \
+             patch("sys.stderr", new=io.StringIO()):
+            self.assertEqual(router.main(), 1)
+        record = json.loads((self.dir / "state" / "last-failure.json").read_text())
+        self.assertEqual(record["detail"], "credential unavailable")
+        self.assertNotIn("/run/x", (self.dir / "state" / "last-failure.json").read_text())
+
+    def test_a_school_failure_records_only_the_exception_type(self):
+        """fetch_school shells out, and its error text is the command line."""
+        err = subprocess.CalledProcessError(
+            1, ["curl", "https://school.example/feed?token=s3cret"])
+        with patch.object(router, "fetch_school", side_effect=err), \
+             patch("sys.stderr", new=io.StringIO()) as errlog:
+            with self.assertRaises(subprocess.CalledProcessError):
+                router.main()
+        record = json.loads((self.dir / "state" / "last-failure.json").read_text())
+        self.assertEqual(record["source"], "school")
+        self.assertEqual(record["detail"], "CalledProcessError")
+        self.assertNotIn("s3cret", (self.dir / "state" / "last-failure.json").read_text())
+        self.assertNotIn("s3cret", errlog.getvalue())
+
+    def test_a_successful_run_clears_the_failure_record(self):
+        (self.dir / "state").mkdir(exist_ok=True)
+        (self.dir / "state" / "last-failure.json").write_text('{"source": "proton"}')
+        self.run_main([])
+        self.assertFalse((self.dir / "state" / "last-failure.json").exists())
 
     def test_a_deploy_marker_round_trips(self):
         self.assertEqual(router.deploy_marker("ha"), "")

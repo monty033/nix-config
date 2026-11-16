@@ -55,6 +55,12 @@ class WatchdogCase(unittest.TestCase):
             "calendars": 7, "events": 100, "files": {},
         }))
 
+    def write_failure(self, source="proton", detail="HTTP 429", minutes_ago=0):
+        stamp = (self.NOW - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds")
+        (self.publish_state.parent / "last-failure.json").write_text(json.dumps({
+            "at": stamp, "source": source, "detail": detail,
+        }))
+
     def record(self, code, **extra):
         row = {"at": "2026-11-15T11:59:00+00:00", "unit": "calendar-caldav-mirror",
                "code": code, "pairs": 7, "failed": 1, "empty": 0}
@@ -226,6 +232,37 @@ class FreshnessTests(WatchdogCase):
         self.write_state(minutes_ago=150)
         self.write_feed(minutes_ago=140)
         self.assertEqual(self._run(), [])
+
+    def test_a_rate_limited_fetch_is_named(self):
+        self.write_feed(minutes_ago=600)
+        self.write_heartbeat(minutes_ago=180)
+        self.write_failure(source="proton", detail="HTTP 429", minutes_ago=180)
+        line = next(l for l in self._run() if "publisher" in l)
+        self.assertIn("Proton fetch failing (HTTP 429)", line)
+        self.assertIn("3 h", line)
+
+    def test_a_failure_older_than_the_last_success_is_ignored(self):
+        # The run after the failure succeeded, so the record is history.
+        self.write_feed(minutes_ago=600)
+        self.write_heartbeat(minutes_ago=180)
+        self.write_failure(source="proton", detail="HTTP 429", minutes_ago=400)
+        line = next(l for l in self._run() if "publisher" in l)
+        self.assertNotIn("HTTP 429", line)
+        self.assertIn("no successful publish for 3 h", line)
+
+    def test_a_healthy_publisher_ignores_an_old_failure_record(self):
+        self.write_feed(minutes_ago=5)
+        self.write_heartbeat(minutes_ago=5)
+        self.write_failure(source="google", detail="HTTP 500", minutes_ago=200)
+        self.assertEqual(self._run(), [])
+
+    def test_a_failure_without_a_timezone_is_not_used(self):
+        self.write_feed(minutes_ago=600)
+        self.write_heartbeat(minutes_ago=180)
+        (self.publish_state.parent / "last-failure.json").write_text(
+            '{"at": "2026-11-16T06:00:00", "source": "proton", "detail": "HTTP 429"}')
+        line = next(l for l in self._run() if "publisher" in l)
+        self.assertNotIn("HTTP 429", line)
 
     def test_a_heartbeat_without_a_timezone_is_not_trusted(self):
         self.publish_state.write_text('{"last_success": "2026-11-16T06:00:00"}')
