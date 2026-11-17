@@ -26,6 +26,7 @@ in
   imports = [
     # ./hardware-configuration.nix  # Not needed - disko manages filesystems
     ./disk-config.nix
+    ./wifi.nix
     ../../users/patrick/hosts/murdock
     ../../users/lina/hosts/murdock
     ../../secrets
