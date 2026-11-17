@@ -28,7 +28,10 @@ from typing import Any, Callable, Iterable, Sequence
 
 VERSION = "0.1.0"
 EXPECTED_ORIGIN = "patrick/nix-config"
-EXPECTED_FORK = "openclaw/nix-config"
+# The fork remote's owner is derived from its URL at run time rather than
+# declared, so renaming the Forgejo automation account needs no edit here.
+FORK_HOST = "git.montycasa.net"
+FORK_REPO = "nix-config"
 REMOTE_BASE = "master"
 
 
@@ -380,16 +383,55 @@ def _expected_remote(url: str, expected: str) -> bool:
     return normalized.endswith(expected.lower())
 
 
+FORGEJO_REMOTE_PATTERN = re.compile(
+    r"^(?:[a-z+]+://)?"
+    r"(?:[^@/]+@)?"
+    + re.escape(FORK_HOST)
+    + r"(?::\d+)?[:/]+(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
+)
+
+
+def parse_fork_remote(url: str) -> tuple[str, str] | None:
+    """Return ``(owner, repo)`` for a Forgejo clone URL, or ``None``."""
+    match = FORGEJO_REMOTE_PATTERN.match(url.strip())
+    if match is None:
+        return None
+    return match.group("owner"), match.group("repo")
+
+
+def fork_owner(repo: Repository) -> str:
+    """The account that owns this repository's ``fork`` remote.
+
+    Derived from the remote URL so the PR head prefix follows the account
+    through a rename instead of pinning a name that will go stale.
+    """
+    try:
+        url = repo.remote_url("fork")
+    except CommandError as exc:
+        raise NixPrError("repository must define a fork remote") from exc
+    parsed = parse_fork_remote(url)
+    if parsed is None:
+        raise NixPrError(f"fork remote is not a {FORK_HOST} clone URL")
+    return parsed[0]
+
+
 def verify_remote_layout(repo: Repository) -> None:
     try:
         origin = repo.remote_url("origin")
-        fork = repo.remote_url("fork")
+        fork_url = repo.remote_url("fork")
     except CommandError as exc:
         raise NixPrError("repository must define origin and fork remotes") from exc
     if not _expected_remote(origin, EXPECTED_ORIGIN):
         raise NixPrError(f"origin does not point to {EXPECTED_ORIGIN}")
-    if not _expected_remote(fork, EXPECTED_FORK):
-        raise NixPrError(f"fork does not point to {EXPECTED_FORK}")
+    parsed_fork = parse_fork_remote(fork_url)
+    if parsed_fork is None:
+        raise NixPrError(f"fork does not point at a {FORK_HOST} clone URL")
+    fork_owner_name, fork_repo_name = parsed_fork
+    if fork_repo_name.lower() != FORK_REPO:
+        raise NixPrError(f"fork does not point to a {FORK_REPO} repository")
+    if f"{fork_owner_name}/{fork_repo_name}".lower() == EXPECTED_ORIGIN.lower():
+        raise NixPrError("fork must not be the canonical repository")
 
 
 def ensure_ready_repository(repo: Repository, *, clean: bool = False) -> str:
@@ -944,7 +986,7 @@ def submit(repo: Repository, *, state_dir: Path | str | None = None, dry_run: bo
         )
     payload = {
         "title": title,
-        "head": f"openclaw:{branch}",
+        "head": f"{fork_owner(repo)}:{branch}",
         "base": REMOTE_BASE,
         "body": body,
     }

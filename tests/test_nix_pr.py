@@ -24,13 +24,16 @@ from nix_pr import (  # noqa: E402
     _run_rendered_config_validation,
     _second_review_check,
     content_fingerprint,
+    fork_owner,
     frigate_image,
     is_substantive_change,
     load_receipt,
     missing_required_sections,
+    parse_fork_remote,
     receipt_path,
     render_config_placeholders,
     validate_commit_message,
+    verify_remote_layout,
     write_receipt,
 )
 
@@ -221,6 +224,87 @@ class RepositoryStateTests(unittest.TestCase):
         self.assertEqual(self.repo.staged_files(), ["README.md"])
         self.assertEqual(self.repo.unstaged_files(), ["README.md"])
         self.assertIn("new.md", self.repo.changed_files(self.repo.git("rev-parse", "HEAD").strip()))
+
+
+class ForkRemoteTests(unittest.TestCase):
+    """The fork owner comes from the remote URL, so an account rename needs no edit."""
+
+    def setUp(self) -> None:
+        self.repo_fixture = TemporaryGitRepository()
+        self.repo = Repository(self.repo_fixture.path)
+        self.repo_fixture.git(
+            "remote", "add", "origin", "https://git.montycasa.net/patrick/nix-config.git"
+        )
+
+    def tearDown(self) -> None:
+        self.repo_fixture.close()
+
+    def test_parses_https_clone_url(self) -> None:
+        self.assertEqual(
+            parse_fork_remote("https://git.montycasa.net/bernie/nix-config.git"),
+            ("bernie", "nix-config"),
+        )
+
+    def test_parses_ssh_clone_url(self) -> None:
+        self.assertEqual(
+            parse_fork_remote("ssh://forgejo@git.montycasa.net:443/bernie/nix-config.git"),
+            ("bernie", "nix-config"),
+        )
+
+    def test_rejects_foreign_hosts(self) -> None:
+        for url in (
+            "https://github.com/bernie/nix-config.git",
+            "https://git.montycasa.net.evil.example/bernie/nix-config.git",
+            "https://evil.example/git.montycasa.net/bernie/nix-config.git",
+            "https://token@evil.example/bernie/nix-config.git",
+        ):
+            with self.subTest(url=url):
+                self.assertIsNone(parse_fork_remote(url))
+
+    def test_accepts_case_variants_and_bare_repo_names(self) -> None:
+        for url in (
+            "https://git.montycasa.net/bernie/nix-config",
+            "https://git.montycasa.net/bernie/nix-config/",
+            "https://user@git.montycasa.net/bernie/nix-config.git",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(parse_fork_remote(url), ("bernie", "nix-config"))
+
+    def test_host_case_is_folded_but_owner_case_is_kept(self) -> None:
+        self.assertEqual(
+            parse_fork_remote("https://GIT.MONTYCASA.NET/Bernie/nix-config.git"),
+            ("Bernie", "nix-config"),
+        )
+
+    def test_fork_owner_tracks_the_remote_url(self) -> None:
+        self.repo_fixture.git(
+            "remote", "add", "fork", "https://git.montycasa.net/legacy-account/nix-config.git"
+        )
+        self.assertEqual(fork_owner(self.repo), "legacy-account")
+        self.repo_fixture.git(
+            "remote", "set-url", "fork", "https://git.montycasa.net/bernie/nix-config.git"
+        )
+        self.assertEqual(fork_owner(self.repo), "bernie")
+
+    def test_accepts_a_fork_under_any_owner(self) -> None:
+        self.repo_fixture.git(
+            "remote", "add", "fork", "https://git.montycasa.net/bernie/nix-config.git"
+        )
+        verify_remote_layout(self.repo)
+
+    def test_rejects_the_canonical_repository_as_fork(self) -> None:
+        self.repo_fixture.git(
+            "remote", "add", "fork", "https://git.montycasa.net/patrick/nix-config.git"
+        )
+        with self.assertRaises(NixPrError):
+            verify_remote_layout(self.repo)
+
+    def test_rejects_a_fork_of_a_different_repository(self) -> None:
+        self.repo_fixture.git(
+            "remote", "add", "fork", "https://git.montycasa.net/bernie/hermes-library.git"
+        )
+        with self.assertRaises(NixPrError):
+            verify_remote_layout(self.repo)
 
 
 class RenderedConfigGateTests(unittest.TestCase):
