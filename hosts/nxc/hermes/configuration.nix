@@ -649,8 +649,20 @@ in
 
   programs.fish.enable = true;
 
-  # Hermes gateway API keys stay in openclaw-env. Forgejo Git authentication is
-  # a separate, runtime-only file consumed solely by the URL-scoped helper.
+  # Agent credentials (API keys, bot tokens) live in agent-env. Forgejo Git
+  # authentication is a separate, runtime-only file consumed solely by the
+  # URL-scoped helper.
+  sops.secrets."agent-env" = {
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+  };
+  # Two-key window: the predecessor secret stays declared until the switch is
+  # verified. The services read agent-env only, so this is not a runtime
+  # fallback: it keeps the old file on disk for comparison and rollback, and it
+  # makes a missing sops key fail activation loudly instead of leaving a
+  # half-populated /run/secrets. Remove this block and the key in secrets.yaml
+  # in the follow-up.
   sops.secrets."openclaw-env" = {
     owner = "hermes";
     group = "users";
@@ -784,7 +796,7 @@ in
     createUser = true;
     stateDir = "/var/lib/hermes";
     workingDirectory = "/var/lib/hermes/workspace";
-    environmentFiles = [ config.sops.secrets.openclaw-env.path ];
+    environmentFiles = [ config.sops.secrets.agent-env.path ];
     environment = {
       TZ = "America/New_York";
       API_SERVER_ENABLED = "true";
@@ -926,7 +938,7 @@ in
 
       # MiniMax TTS on the global endpoint (api.minimax.io). The credential is
       # MINIMAX_API_KEY, which the service already receives from the
-      # openclaw-env secret file; no additional sops entry is required.
+      # agent-env secret file; no additional sops entry is required.
       # tts.minimax.region is deliberately omitted: the resolver selects
       # "global" when only the global credential variable is present.
       tts = {
@@ -1353,9 +1365,9 @@ in
         };
       };
 
-      # Telegram — requires a NEW bot token separate from openclaw's.
-      # Set TELEGRAM_BOT_TOKEN in openclaw-env to hermes's bot token.
-      # Allow-list mirrors openclaw (user 748642877 = Monty).
+      # Telegram — requires a bot token of its own.
+      # Set TELEGRAM_BOT_TOKEN in agent-env to this agent's bot token.
+      # Allow-list is the operator account (user 748642877 = Monty).
       telegram = {
         reactions = false;
       };
@@ -2392,7 +2404,7 @@ if __name__ == "__main__":
     serviceConfig = {
       User = "hermes";
       Group = "users";
-      EnvironmentFile = config.sops.secrets."openclaw-env".path;
+      EnvironmentFile = config.sops.secrets."agent-env".path;
       ExecStart = "${hermes-dashboard-launch}";
       Restart = "on-failure";
       RestartSec = 5;
