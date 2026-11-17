@@ -657,17 +657,6 @@ in
     group = "users";
     mode = "0400";
   };
-  # Two-key window: the predecessor secret stays declared until the switch is
-  # verified. The services read agent-env only, so this is not a runtime
-  # fallback: it keeps the old file on disk for comparison and rollback, and it
-  # makes a missing sops key fail activation loudly instead of leaving a
-  # half-populated /run/secrets. Remove this block and the key in secrets.yaml
-  # in the follow-up.
-  sops.secrets."openclaw-env" = {
-    owner = "hermes";
-    group = "users";
-    mode = "0400";
-  };
   # The Proton recipient allowlist, deliberately NOT a declarative setting: it is
   # personal data, and a declarative setting writes it into git, the Nix store and
   # the 0660 runtime config.yaml in plain text (the module's environmentFiles
