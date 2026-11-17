@@ -231,16 +231,27 @@
     # snapshot being read. The corpus census is unchanged in scope: it still
     # enumerates the listing, which is bounded upstream at 256 notes.
     #
-    # The pin before this one (dc89bf7) was 2 commits after its own
-    # predecessor (revCount 729 to 731).
+    # Earlier pin dc89bf7: 2 commits after its own predecessor (revCount 729
+    # to 731).
     #
-    # This revision is 2 commits after the previous pin (revCount 731 to 733)
-    # and is the merge of #307, which changes the lock and visibility decision
-    # in the read-only projection that discovery and `notes.get` both use: a
-    # note with a title and no body is decided by its own signals instead of
-    # being withheld as undecidable.
+    # Earlier pin e387cb68: 2 commits after its own predecessor (revCount 731
+    # to 733). It was the merge of #307, which let a note with a title and no
+    # body be decided by its own visibility and lock signals instead of being
+    # withheld as undecidable.
+    #
+    # This revision is 2 commits after the previous pin (revCount 733 to 735)
+    # and is the merge of #309, which lets a note that has a title and no body
+    # be deleted. Core reads rows with `select *`, so such a note carries
+    # `contentId: null`; the write projection rejected that as a malformed
+    # identifier before the revision, lock and conflict guards ran, so a note
+    # `notes.get` served could not be trashed. Metadata-only edits on such a
+    # note now work too. Before an absent body is read as unlocked the seam
+    # queries the note's incoming relations — the direction core stores a Vault
+    # lock in — so a Vault-linked note, or an unanswerable probe, still refuses
+    # with `vault_locked`, and a note naming a content row that has not arrived
+    # refuses with `sync_required`.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=e387cb68093ca042e17bb8ce1c62bd5ada353abe";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=91821b8bad3fc4e5d2d12249733476edcf143647";
       flake = false;
     };
 
