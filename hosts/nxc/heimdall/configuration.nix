@@ -72,6 +72,10 @@ in
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-4-password"; }
       { name = "HOMELAB-DIST-2.5G"; family = "legacy"; host = "192.168.86.6"; port = 80;
         scheme = "http"; username = "admin"; credential = "switch-192-168-86-6-password"; }
+      # The basement unit is an Easy Smart switch: plain form login, four pages,
+      # no address table and no counters, so it reports ports and VLANs only.
+      { name = "BASEMENT-POE-1G"; family = "tplink"; host = "192.168.86.5"; port = 80;
+        scheme = "http"; username = "admin"; credential = "switch-192-168-86-5-password"; }
     ];
 
     # How the switches are wired together. The switch-to-switch links below are
@@ -86,7 +90,7 @@ in
         { id = "HOMELAB-DIST-2.5G"; label = "HOMELAB-DIST-2.5G"; kind = "switch"; readable = true; }
         { id = "HOMELAB-POE-2.5G"; label = "HOMELAB-POE-2.5G"; kind = "switch"; readable = true; }
         { id = "OFFICE-SUB-2.5G"; label = "OFFICE-SUB-2.5G"; kind = "switch"; readable = true; }
-        { id = "BASEMENT-POE-1G"; label = "BASEMENT-POE-1G"; kind = "external"; readable = false; }
+        { id = "BASEMENT-POE-1G"; label = "BASEMENT-POE-1G"; kind = "switch"; readable = true; }
       ];
       links = [
         { from = "router"; fromPort = 1; to = "HOMELAB-AGG-10G"; toPort = 8; speed = 10000; }
@@ -162,6 +166,7 @@ in
         "switch-192-168-86-3-password:/run/secrets/switch-192-168-86-3-password"
         "switch-192-168-86-4-password:/run/secrets/switch-192-168-86-4-password"
         "switch-192-168-86-6-password:/run/secrets/switch-192-168-86-6-password"
+        "switch-192-168-86-5-password:/run/secrets/switch-192-168-86-5-password"
       ];
       ExecStart = "${inputs.heimdall.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/heimdall /etc/heimdall/config.json";
       User = "heimdall";
@@ -205,6 +210,7 @@ in
         "192.168.86.3/32"
         "192.168.86.4/32"
         "192.168.86.6/32"
+        "192.168.86.5/32"
       ];
     };
   };
@@ -234,21 +240,35 @@ in
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.3 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.4 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.6 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.5 -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.3 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.4 -j ACCEPT 2>/dev/null || true
     ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.6 -j ACCEPT 2>/dev/null || true
-    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP 2>/dev/null || true
-    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP 2>/dev/null || true
+    ip46tables -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.5 -j ACCEPT 2>/dev/null || true
+    # Confinement is never absent for even an instant: drop duplicates of the
+    # deny rule but always keep one in place, then put the allowances above it.
+    # Deleting the last one and appending a replacement would leave the service
+    # uid unrestricted in between, and a rebuild runs this while the old
+    # process may still be alive.
+    for tool in iptables ip6tables; do
+      deny="-m owner --uid-owner ${toString heimdallUid} -j DROP"
+      n=0
+      while [ "$($tool -w -S OUTPUT 2>/dev/null | grep -cF -- "$deny" || true)" -gt 1 ] && [ "$n" -lt 8 ]; do
+        $tool -w -D OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP || break
+        n=$((n + 1))
+      done
+      $tool -w -S OUTPUT 2>/dev/null | grep -qF -- "$deny" || \
+        $tool -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
+    done
     iptables -w -I nixos-fw 1 -s 192.168.86.0/24 -p tcp --dport 9140 -j nixos-fw-accept
-    iptables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
     iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -p tcp --sport 9140 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 127.0.0.0/8 -j ACCEPT
     iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.2 -p tcp --dport 80 -j ACCEPT
     iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.3 -p tcp --dport 80 -j ACCEPT
     iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.4 -p tcp --dport 80 -j ACCEPT
     iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.6 -p tcp --dport 80 -j ACCEPT
-    ip6tables -w -A OUTPUT -m owner --uid-owner ${toString heimdallUid} -j DROP
+    iptables -w -I OUTPUT 1 -m owner --uid-owner ${toString heimdallUid} -d 192.168.86.5 -p tcp --dport 80 -j ACCEPT
   '';
 
   networking.firewall.interfaces."tailscale0".allowedTCPPorts = [ 9140 ];
