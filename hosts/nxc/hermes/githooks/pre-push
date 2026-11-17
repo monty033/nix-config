@@ -1,19 +1,52 @@
 #!/usr/bin/env bash
-# Rocket pre-push githook: block pushes that don't build
+# Pre-push githook: block pushes that don't build.
+#
+# The gate keys on the ROLE of the remote, never on the name of the account
+# that owns the fork. Matching an owner name stops running the build the
+# moment that account is renamed, and the PR still opens.
+#
+# The URL is normalised before matching because a substring test fails open:
+# `ssh://git@host:443/owner/repo`, `git@host:owner/repo`, and any difference
+# in case all miss a `*host/owner/*` glob and fall through to "not the forge",
+# silently skipping the build for a PR branch.
 set -euo pipefail
 
-echo "🔨 Rocket pre-push: testing Nix build..."
+echo "🔨 Pre-push: testing Nix build..."
 
-REMOTE="$1"
-URL="$2"
+REMOTE="${1:-}"
+URL="${2:-}"
 
-# Only run on fork pushes (PR branches)
-if [[ "$URL" != *"openclaw"* ]]; then
-  echo "  ↳ Skipping build test (not pushing to fork)"
+# Pushing to the canonical remote is never how a merge happens.
+case "${REMOTE,,}" in
+  origin)
+    echo "  ↳ Skipping build test (canonical remote)"
+    exit 0
+    ;;
+esac
+
+# host + path out of https://, ssh://, or scp-like user@host:path
+target="${URL#*://}"
+target="${target##*@}"
+host="${target%%[:/]*}"
+rest="${target#"$host"}"
+rest="${rest#:}"
+case "$rest" in
+  [0-9]*/*) rest="${rest#*/}" ;;  # drop a port
+esac
+path="${rest#/}"
+
+if [ "${host,,}" != "git.montycasa.net" ]; then
+  echo "  ↳ Skipping build test (not the Forgejo host)"
   exit 0
 fi
+case "${path,,}" in
+  patrick/*)
+    echo "  ↳ Skipping build test (canonical repository)"
+    exit 0
+    ;;
+esac
 
-echo "  ↳ Running nix build..."
+echo "  ↳ Pushing to ${REMOTE}: running nix build..."
 if nix --extra-experimental-features 'nix-command flakes' build \
   .#nixosConfigurations.hermes.config.system.build.toplevel \
   --no-link 2>&1; then

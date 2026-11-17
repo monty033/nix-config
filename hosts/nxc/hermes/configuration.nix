@@ -422,7 +422,10 @@ let
     done
 
     if [ "$protocol" = "https" ] && [ "$host" = "git.montycasa.net" ]; then
-      printf '%s\n' 'username=openclaw'
+      # The forge login is the automation account's current name. It is data,
+      # not behaviour: nothing else in this helper or the push path depends on
+      # it, and scripts/nix_pr.py derives the fork owner from the remote URL.
+      printf '%s\n' 'username=bernie'
       printf 'password='
       cat ${config.sops.secrets."forgejo-token".path}
     fi
