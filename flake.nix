@@ -239,19 +239,27 @@
     # body be decided by its own visibility and lock signals instead of being
     # withheld as undecidable.
     #
-    # This revision is 2 commits after the previous pin (revCount 733 to 735)
-    # and is the merge of #309, which lets a note that has a title and no body
-    # be deleted. Core reads rows with `select *`, so such a note carries
-    # `contentId: null`; the write projection rejected that as a malformed
-    # identifier before the revision, lock and conflict guards ran, so a note
+    # The pin before this one `91821b8` was 2 commits after its own predecessor
+    # (revCount 733 to 735) and was the merge of #309, which lets a note that has
+    # a title and no body be deleted. Core reads rows with `select *`, so such a
+    # note carries `contentId: null`; the write projection rejected that as a
+    # malformed identifier before the revision, lock and conflict guards ran, so a note
     # `notes.get` served could not be trashed. Metadata-only edits on such a
     # note now work too. Before an absent body is read as unlocked the seam
     # queries the note's incoming relations — the direction core stores a Vault
     # lock in — so a Vault-linked note, or an unanswerable probe, still refuses
     # with `vault_locked`, and a note naming a content row that has not arrived
     # refuses with `sync_required`.
+    #
+    # This revision is 2 commits after the previous pin (revCount 735 to 737)
+    # and is the merge of #311, which makes a Vault link lock a note even when
+    # the note has a readable content row. Core stores the lock as a
+    # `vault -> note` relation rather than a column, so a content record reading
+    # `locked: false`, or carrying no marker, is no longer proof that the note is
+    # unlocked; discovery, `notes.get` and the write seam consult the incoming
+    # relation.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=91821b8bad3fc4e5d2d12249733476edcf143647";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=c1871cda7db6a977f10d2ff322b0c05d0e6861c6";
       flake = false;
     };
 
