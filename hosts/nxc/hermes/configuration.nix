@@ -640,6 +640,16 @@ in
     oc-tier
     graphviz
     tmux
+    # Root-only attach for the dedicated, monitored admin tmux server. The
+    # wrapper refuses non-root callers so the socket never gains a second
+    # consumer by accident.
+    (writeShellScriptBin "tmux-admin" ''
+      if [ "$(${coreutils}/bin/id -u)" -ne 0 ]; then
+        echo "tmux-admin: root only (the shared admin server is not a general socket)" >&2
+        exit 1
+      fi
+      exec ${tmux}/bin/tmux -S /run/tmux-share/admin.sock attach -t admin "$@"
+    '')
     pkgs.jq
     pkgs.tesseract
     pkgs.rsync
@@ -1874,6 +1884,12 @@ if __name__ == "__main__":
   };
 
   systemd.tmpfiles.rules = [
+    # Monitored admin tmux server. The directory is traversable by the
+    # tmux-share group but not listable; the socket inside it stays owner-only
+    # root:root (tmux's own default), so group membership never buys a
+    # connection. Only the transcript below is readable.
+    "d /run/tmux-share 0710 root tmux-share -"
+    "z /run/tmux-share/admin.log 0640 root tmux-share -"
     "d /var/lib/hermes/scripts 0755 hermes users -"
     # Rescue ISO build state, all root-owned except the trigger directory. The
     # agent may only create `/var/lib/rescue/in/request`; it can neither rename
@@ -2320,7 +2336,10 @@ if __name__ == "__main__":
   # apply, browse-operator and upload approval, which is the whole finding.
   users.users.hermes = {
     linger = true;
-    extraGroups = [ "nookbridge-clients" ];
+    # tmux-share grants read access to the monitored admin transcript only
+    # (/run/tmux-share/admin.log). It carries no socket access — see the
+    # "Monitored tmux admin session" block below for why.
+    extraGroups = [ "nookbridge-clients" "tmux-share" ];
   };
 
   assertions = [
@@ -2463,6 +2482,333 @@ if __name__ == "__main__":
       ExecStart = "${pkgs.python3}/bin/python3 /var/lib/hermes/workspace/nookbridge-dash/app/server.py --bind ${hermesTailscaleIp} --port 9130 --db /var/lib/hermes/nookbridge-dash/dash.db --host dash.montycasa.net";
       Restart = "on-failure";
       RestartSec = 5;
+    };
+  };
+
+  # ── Monitored tmux admin session ───────────────────────────────────────────
+  # A dedicated tmux server runs as root on /run/tmux-share/admin.sock, with a
+  # session called `admin` that the operator attaches to from a root shell.
+  #
+  # The agent gets a read-only VIEW, not a connection. That distinction is the
+  # whole point: tmux's read-only mode is a client flag, not an authorisation
+  # boundary. `server-access -a -r <user>` stops that user's attached client
+  # from typing into a pane, but the same user can open a second,
+  # non-interactive client and run `send-keys`, `kill-session`, `set-option` or
+  # `run-shell` — and `run-shell` executes as the server's owner, which here is
+  # root. tmux.1 says the same: the access list defaults to empty and exists
+  # because "these permissions must be changed manually", with the warning not
+  # to grant access even read-only to untrusted users.
+  #
+  # So the socket keeps tmux's default owner-only mode (0700 root:root here) and
+  # the `tmux-share` group carries no socket access at all. The server taps
+  # every pane of the `admin` session into admin.log (0640 root:tmux-share) and
+  # the agent reads that file. Consequence: sending keys, executing commands or
+  # controlling the session is not merely forbidden, it is impossible without
+  # root.
+  #
+  # Accepted exposure, stated plainly: the transcript is a live copy of
+  # everything displayed in the tapped panes *from the moment the tap attaches*,
+  # so privileged or operator-surface output run there becomes readable by the
+  # agent. That is the point of the feature, but it means this pane is not the
+  # place for work whose output must stay out of the agent's reach. Coverage
+  # caveats, so this is not read as a complete record: output a pane produces
+  # before the tap reaches it is lost (startup, up to one watchdog interval for
+  # a pane opened later, and the moment a trim has the taps closed), and
+  # sessions other than `admin` are never tapped. The transcript also outlives
+  # the pane: it stays readable until the trimmer reduces it or the host
+  # reboots.
+  #
+  # The session's shells get this server's settings, not a login shell's:
+  # fish as default-shell, the PATH above and TERM=tmux-256color. That is
+  # deliberate (a fish admin shell was requested) and scoped to this session;
+  # no global shell or environment is changed.
+  users.groups.tmux-share = { };
+  # `hermes` is in `extraGroups` above. A process that is already running keeps
+  # its old group set, so the agent reads the transcript as `sg tmux-share -c …`
+  # until its session is restarted; nothing else is needed.
+
+  environment.etc."tmux-share.conf".text = ''
+    # Config for the dedicated admin server only (never sourced by a normal
+    # tmux server: the unit passes it with -f).
+    # exit-empty stays ON, overriding the value -D implies: when the last pane
+    # exits the server exits, systemd restarts it, and the tap is re-attached.
+    # Keeping the server alive with no session would leave a dead session name
+    # and a dead tap that nothing recreates.
+    set -g exit-empty on
+    set -g default-shell /run/current-system/sw/bin/fish
+    set -g default-terminal "tmux-256color"
+    set -g history-limit 50000
+    set-environment -g PATH /run/current-system/sw/bin:/run/current-system/sw/sbin
+    new-session -d -s admin -c /root
+    # Defence in depth, NOT the boundary: if the socket mode is ever widened,
+    # clients matching this user are read-only. It cannot stop send-keys or
+    # run-shell from a connect-capable account.
+    server-access -a -r hermes
+  '';
+
+  systemd.services."tmux-admin" = {
+    description = "Dedicated tmux admin server (output tapped for read-only monitoring)";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "local-fs.target" ];
+    # The unit embeds the store path of the server config, so editing that
+    # config changes this unit and restarts the server; socket, session and tap
+    # come back with it. Restarting kills the session's processes and its
+    # scrollback with systemd's control-group kill, so an activation while the
+    # operator is mid-task is not free. Restart=always covers a crash, and no
+    # start limit applies: rate-limiting a supervisor turns a transient failure
+    # into a session that stays down until someone intervenes.
+    restartIfChanged = true;
+    unitConfig.StartLimitIntervalSec = 0;
+    serviceConfig = {
+      Type = "simple";
+      Restart = "always";
+      RestartSec = 2;
+      # No UMask here on purpose: the server process is the parent of the
+      # operator's shells, so its umask would silently become their umask. The
+      # socket's own mode is tmux's business (0700, owner-only), not this unit's.
+      # The bind below needs the directory to exist; tmpfiles creates it at boot
+      # and on activation, but the unit must also start by hand without one.
+      ExecStartPre = "${pkgs.writeShellScript "tmux-admin-dir" ''
+        ${pkgs.coreutils}/bin/install -d -m 0710 -o root -g tmux-share /run/tmux-share
+      ''}";
+      # Runs while the server is up: create the transcript with group-read
+      # permissions and start the output tap. Prefixed with "-" so a failed tap
+      # degrades monitoring instead of tearing down the operator's live session;
+      # the failure is still visible in the journal.
+      ExecStartPost = "-${pkgs.writeShellScript "tmux-admin-tap" ''
+        set -eu
+        SOCK=/run/tmux-share/admin.sock
+        LOG=/run/tmux-share/admin.log
+        TMUX=${pkgs.tmux}/bin/tmux
+        if [ ! -e "$LOG" ]; then
+          ${pkgs.coreutils}/bin/install -m 0640 -o root -g tmux-share /dev/null "$LOG"
+        fi
+        # Serialise with the watchdog and the trimmer. The lock file is 0600 and
+        # outside the group-readable directory, because an exclusive flock needs
+        # no write permission: a group-readable lock would let the agent open it
+        # read-only and hold it, stalling taps and trims. The wait is bounded for
+        # the same reason.
+        ( umask 077; : > /run/tmux-share.lock )
+        ${pkgs.coreutils}/bin/chmod 0600 /run/tmux-share.lock
+        exec 9>/run/tmux-share.lock
+        ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
+          { echo "tmux-admin: the tap lock is busy; the watchdog will retry" >&2; exit 1; }
+        i=0
+        while [ "$i" -lt 100 ]; do
+          if ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" has-session -t admin 2>/dev/null; then
+            # No -o here: a fresh server has no pipe on this pane, and -o is a
+            # toggle on an existing pipe rather than a no-op (measured on 3.7b:
+            # a second -o closed the pipe and output stopped).
+            ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" pipe-pane -t admin "exec ${pkgs.coreutils}/bin/cat >> $LOG"
+            exit 0
+          fi
+          i=$((i + 1))
+          ${pkgs.coreutils}/bin/sleep 0.1
+        done
+        echo "tmux-admin: the admin session did not appear" >&2
+        exit 1
+      ''}";
+    };
+    script = ''
+      exec ${pkgs.tmux}/bin/tmux -D -S /run/tmux-share/admin.sock \
+        -f ${config.environment.etc."tmux-share.conf".source}
+    '';
+  };
+
+  # The watch on the tap. ExecStartPost taps the pane that exists at startup,
+  # but a pipe ends with its pane: closing that pane leaves the transcript frozen
+  # while the unit still reports healthy, and a pane opened later is untapped
+  # until this runs. This checks each pane's real state (`#{pane_pipe}`) and
+  # attaches only where nothing is attached, so coverage follows the panes
+  # without disturbing a healthy tap. Panes share one transcript, so their output
+  # interleaves.
+  systemd.services."tmux-admin-tap" = {
+    description = "Keep the transcript tap attached to every pane of the admin session";
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0077";
+    };
+    script = ''
+      SOCK=/run/tmux-share/admin.sock
+      LOG=/run/tmux-share/admin.log
+      TMUX=${pkgs.tmux}/bin/tmux
+      TO=${pkgs.coreutils}/bin/timeout
+      [ -S "$SOCK" ] || exit 0
+      recreated=0
+      REBUILD=/run/tmux-share.rebuild
+      if [ ! -e "$LOG" ]; then
+        # Recreate it, and note that recreating alone changes nothing: the panes'
+        # `cat >> admin.log` still hold the unlinked inode, and no attach command
+        # can move them, so the taps below are retired explicitly. The marker is
+        # written here, before the lock, because this pass can still exit early
+        # (busy lock, tmux not answering) and a later pass that sees only a
+        # present file would otherwise never retry.
+        ${pkgs.coreutils}/bin/install -m 0640 -o root -g tmux-share /dev/null "$LOG"
+        : > "$REBUILD"
+      fi
+      if [ -e "$REBUILD" ]; then
+        recreated=1
+      fi
+      # Bounded wait, 0600 lock: see the note on the startup tap.
+      ( umask 077; : > /run/tmux-share.lock )
+      ${pkgs.coreutils}/bin/chmod 0600 /run/tmux-share.lock
+      exec 9>/run/tmux-share.lock
+      ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
+        { echo "tmux-admin-tap: the tap lock is busy; skipping this pass" >&2; exit 1; }
+      # Every tmux call is bounded: a server that accepts connections but stops
+      # answering would otherwise block while this holds the shared lock.
+      # #{pane_pipe} is fetched in the same call so the decision to attach is
+      # based on real state: `pipe-pane -o` is a toggle, not "attach if absent".
+      if ! panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id} #{pane_pipe}'); then
+        echo "tmux-admin-tap: cannot list panes (refused, wedged or too slow)" >&2
+        exit 1
+      fi
+      rebuilt=1
+      while read -r pane has; do
+        [ -n "$pane" ] || continue
+        if [ "$recreated" -eq 1 ]; then
+          # Recreating the file leaves the old pipe writing to the unlinked
+          # inode, so retire it first and treat the pane as untapped.
+          if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane"; then
+            echo "tmux-admin-tap: could not retire the stale tap on $pane; will retry" >&2
+            rebuilt=0
+            continue
+          fi
+          has=0
+        fi
+        if [ "$has" = 1 ]; then
+          continue
+        fi
+        # Report failures: a tap that silently refuses to attach looks exactly
+        # like an idle pane in the transcript.
+        if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane" \
+          "exec ${pkgs.coreutils}/bin/cat >> $LOG"; then
+          echo "tmux-admin-tap: could not attach the tap to $pane" >&2
+          rebuilt=0
+        fi
+      done <<< "$panes"
+      if [ "$recreated" -eq 1 ]; then
+        if [ "$rebuilt" -eq 1 ]; then
+          ${pkgs.coreutils}/bin/rm -f "$REBUILD"
+          echo "tmux-admin-tap: rebuilt the taps for every pane" >&2
+        else
+          : > "$REBUILD"
+          echo "tmux-admin-tap: some taps still need rebuilding; next pass retries" >&2
+        fi
+      fi
+    '';
+  };
+
+  systemd.timers."tmux-admin-tap" = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "20s";
+      OnUnitActiveSec = "20s";
+      Unit = "tmux-admin-tap.service";
+    };
+  };
+
+  # The transcript lives in /run (tmpfs): it is not intentionally written to disk
+  # and is wiped at boot, but tmpfs pages are swappable and the server also keeps
+  # its own scrollback in memory, so treat this as bounded retention rather than
+  # as storage that never holds sensitive output. A long build or a log tail can
+  # otherwise eat RAM, so this trims down to the newest 2 MiB once a five-minute
+  # tick sees the file above 4 MiB. The bound is therefore "2-4 MiB plus up to
+  # one tick interval of output", not a hard 2 MiB ceiling, and it holds only
+  # while trims succeed: a server that keeps failing to list or close panes skips
+  # the trim, so the file can grow until tmux recovers. The trim closes the taps,
+  # writes the tail to a new file and renames it into place, so a writer that is
+  # still flushing cannot tear the new transcript; output produced between the
+  # close and the reopen is not recorded. The cut is byte-based, so the first
+  # retained line can begin mid-line or mid-escape sequence.
+  systemd.services."tmux-admin-logtrim" = {
+    description = "Cap the monitored tmux transcript, keeping the newest output";
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0077";
+    };
+    script = ''
+      set -eu
+      LOG=/run/tmux-share/admin.log
+      NEW=$LOG.new
+      SOCK=/run/tmux-share/admin.sock
+      TMUX=${pkgs.tmux}/bin/tmux
+      TO=${pkgs.coreutils}/bin/timeout
+      [ -f "$LOG" ] || exit 0
+      size=$(${pkgs.coreutils}/bin/stat -c %s "$LOG")
+      [ "$size" -gt 4194304 ] || exit 0
+      # Close every tap, write the tail to a new file, then rename it into place.
+      # Rename is atomic, so a straggler that was mid-flush ends up on the
+      # unlinked inode (losing at most its last bytes) instead of tearing the new
+      # file. The close is checked rather than best-effort: a pipe that survived
+      # the trim would keep writing to the unlinked inode, and the watchdog
+      # (which only attaches where `#{pane_pipe}` is 0) would not notice, so the
+      # transcript would freeze until the server restarted. The lock stops the
+      # watchdog re-tapping mid-trim.
+      ( umask 077; : > /run/tmux-share.lock )
+      ${pkgs.coreutils}/bin/chmod 0600 /run/tmux-share.lock
+      exec 9>/run/tmux-share.lock
+      ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
+        { echo "tmux-admin-logtrim: the tap lock is busy; skipping this trim" >&2; exit 1; }
+      if ! panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id}'); then
+        echo "tmux-admin-logtrim: cannot enumerate panes; not trimming" >&2
+        exit 1
+      fi
+      closed=1
+      for pane in $panes; do
+        if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane"; then
+          echo "tmux-admin-logtrim: could not stop the tap on $pane; not trimming" >&2
+          closed=0
+        fi
+      done
+      # From here on every exit path must put the taps back, including a failing
+      # chmod/chgrp/mv under set -e. Output produced between close and reopen is
+      # not recorded; that gap is the price of rewriting under a live writer.
+      reopen() {
+        rc=$?
+        # Re-read the real state rather than trusting the pre-close list: a
+        # `pipe-pane -o` on a live pipe closes it instead of being a no-op.
+        now=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin \
+          -F '#{pane_id} #{pane_pipe}' 2>/dev/null || true)
+        while read -r pane has; do
+          [ -n "$pane" ] || continue
+          [ "$has" = 1 ] && continue
+          "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane" \
+            "exec ${pkgs.coreutils}/bin/cat >> $LOG" ||
+            echo "tmux-admin-logtrim: could not reopen the tap on $pane" >&2
+        done <<< "$now"
+        exit "$rc"
+      }
+      trap reopen EXIT
+      if [ "$closed" -ne 1 ]; then
+        exit 1
+      fi
+      if ! ${pkgs.coreutils}/bin/tail -c 2097152 "$LOG" > "$NEW"; then
+        echo "tmux-admin-logtrim: could not read the transcript; leaving it alone" >&2
+        ${pkgs.coreutils}/bin/rm -f "$NEW"
+        exit 1
+      fi
+      if ! ${pkgs.coreutils}/bin/chmod 0640 "$NEW" ||
+         ! ${pkgs.coreutils}/bin/chgrp tmux-share "$NEW"; then
+        echo "tmux-admin-logtrim: could not set the transcript's mode; leaving it alone" >&2
+        ${pkgs.coreutils}/bin/rm -f "$NEW"
+        exit 1
+      fi
+      if ! ${pkgs.coreutils}/bin/mv -f "$NEW" "$LOG"; then
+        echo "tmux-admin-logtrim: could not replace the transcript" >&2
+        ${pkgs.coreutils}/bin/rm -f "$NEW"
+        exit 1
+      fi
+      exit 0
+    '';
+  };
+
+  systemd.timers."tmux-admin-logtrim" = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5min";
+      OnUnitActiveSec = "5min";
+      Unit = "tmux-admin-logtrim.service";
     };
   };
 
