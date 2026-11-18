@@ -259,15 +259,22 @@
     # that the note is unlocked; discovery, `notes.get` and the write seam
     # consult the incoming relation.
     #
-    # This revision is 2 commits after the previous pin (revCount 737 to 739)
-    # and is the merge of #313, which stops the operator path diagnostic from
-    # describing a locked note's body. That diagnostic reports body shape, and
-    # it decided from the stored content record's own marker, so a note the
-    # vault has linked was still described whenever the record read
-    # `locked: false`; it now asks the same lock rule as discovery, `notes.get`
-    # and the write seam, and refuses.
+    # Earlier pin `59a4c203c569f3332e79d9709e46ed87d8c53f05`: 2 commits after
+    # its own predecessor (revCount 737 to 739). It was the merge of #313,
+    # which stops the operator path diagnostic from describing a locked note's
+    # body. That diagnostic reports body shape, and it decided from the stored
+    # content record's own marker, so a note the vault has linked was still
+    # described whenever the record read `locked: false`; it now asks the same
+    # lock rule as discovery, `notes.get` and the write seam, and refuses.
+    #
+    # This revision is 7 commits after the previous pin (revCount 739 to 746)
+    # and is the merge of #314, which makes a recovery leave state the service
+    # user can open and lets live login read the systemd credential key. Fresh
+    # members created by a reinitialize now take the state root's owner instead
+    # of the operator's, and the auth commands read the key from the systemd
+    # credential slot rather than a development key file beside the state.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=59a4c203c569f3332e79d9709e46ed87d8c53f05";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=ebc3dc8ebd0fc2109848b836dbeff9338bd46688";
       flake = false;
     };
 
