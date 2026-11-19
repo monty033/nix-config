@@ -743,6 +743,19 @@ in
     mode = "0400";
     restartUnits = [ "hermes-agent.service" ];
   };
+  # The Signal DM allowlist names a person's account and this repository is
+  # published, so it is a secret file rather than a config value. Same pattern
+  # as hermes-proton-env above: a dotenv string in an encrypted YAML key, loaded
+  # straight into the unit environment at start.
+  sops.secrets."hermes-signal-env" = {
+    sopsFile = ../../../secrets/hermes-signal-env.yaml;
+    key = "hermes-signal-env";
+    format = "yaml";
+    owner = "hermes";
+    group = "users";
+    mode = "0400";
+    restartUnits = [ "hermes-agent.service" ];
+  };
   sops.secrets."hermes-webhook" = {
     owner = "hermes";
     group = "users";
@@ -1455,6 +1468,29 @@ in
           };
         };
 
+        # Signal. The transport is the loopback daemon installed above; this
+        # block is what makes the agent use it. The DM allowlist is deliberately
+        # NOT here: this repository is published to GitHub, and the allowlist
+        # names a person's account, so it lives in an encrypted environment file
+        # (hermes-signal-env, decrypted to a second EnvironmentFile on the agent
+        # unit) rather than here.
+        #
+        # The allowlist is loaded from that encrypted file as an EnvironmentFile
+        # on the agent unit; the adapter reads it through the process
+        # environment, which is why it cannot live in this block.
+        signal = {
+          enabled = true;
+          extra = {
+            http_url = "http://127.0.0.1:18081";
+            account = signalAccountAci;
+            # Without this, an unknown sender is answered with a pairing code
+            # rather than ignored, which advertises the account. Published here
+            # because it names no person and closes that gap even if the
+            # allowlist secret is missing or stale.
+            dm_policy = "allowlist";
+          };
+        };
+
         webhook = {
           enabled = true;
           extra = {
@@ -1527,8 +1563,12 @@ in
   # it can still surface in an env dump or a core file.
   systemd.services.hermes-agent.serviceConfig.EnvironmentFile = [
     config.sops.secrets."hermes-proton-env".path
+    config.sops.secrets."hermes-signal-env".path
   ];
-  systemd.services.hermes-agent.after = [ "sops-install-secrets.service" ];
+  # The Signal platform talks to a separate unit, so order after it as well:
+  # the first connect at boot should not race the daemon's own startup. The
+  # adapter retries regardless, so this only keeps the journal honest.
+  systemd.services.hermes-agent.after = [ "sops-install-secrets.service" "signal-cli-daemon.service" ];
 
   # Fix file ownership after nix rebuilds. The activation script chowns
   # directories but not individual files — if anything runs as root and
