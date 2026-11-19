@@ -2757,18 +2757,89 @@ if __name__ == "__main__":
   # interleaves.
   systemd.services."tmux-admin-tap" = {
     description = "Keep the transcript tap attached to every pane of the admin session";
+    # Ordering shapes the boot transaction and queued jobs during a switch; a tick
+    # that still lands early is a skipped pass in the script below.
+    after = [ "tmux-admin.service" ];
     serviceConfig = {
       Type = "oneshot";
       UMask = "0077";
     };
     script = ''
-      SOCK=/run/tmux-share/admin.sock
-      LOG=/run/tmux-share/admin.log
-      TMUX=${pkgs.tmux}/bin/tmux
-      TO=${pkgs.coreutils}/bin/timeout
-      [ -S "$SOCK" ] || exit 0
+      SOCK=''${TMUX_ADMIN_SOCK:-/run/tmux-share/admin.sock}
+      LOG=''${TMUX_ADMIN_LOG:-/run/tmux-share/admin.log}
+      LOCK=''${TMUX_ADMIN_LOCK:-/run/tmux-share.lock}
+      REBUILD=''${TMUX_ADMIN_REBUILD:-/run/tmux-share.rebuild}
+      TMUX=''${TMUX_ADMIN_TMUX:-${pkgs.tmux}/bin/tmux}
+      TO=''${TMUX_ADMIN_TIMEOUT:-${pkgs.coreutils}/bin/timeout}
+      # How long has the server been unusable? A not-ready server is excused for
+      # NOTREADY_GRACE seconds counted from the first pass that saw it not ready
+      # (not from the unit's start time),
+      # so an activation race or a short restart is quiet while a server that stays
+      # down is reported once the grace expires. A flapping server is NOT reported
+      # if a tick lands in one of its up-windows: a successful pass clears the
+      # marker. That is the price of not failing healthy restarts. The stamp is a plain file
+      # beside the transcript in the root-owned directory; no systemd query is
+      # involved, so there is no second clock to disagree with.
+      NOTREADY=''${LOG%/*}/.notready-since
+      NOTREADY_GRACE=300
+      excused_while_not_ready() {
+        # /proc/uptime, not wall time: a clock step cannot move it, and it cannot
+        # read higher than a later reading within a boot, and the `since > now`
+        # test below is the guard for anything that did. /run is tmpfs, so a
+        # reboot clears the marker along with the transcript it belongs to.
+        now=$(${pkgs.coreutils}/bin/cut -d. -f1 /proc/uptime) || now=""
+        case "$now" in
+          "" | *[!0-9]*) echo "$1: cannot read /proc/uptime; not excusing" >&2; return 1 ;;
+        esac
+        since=""
+        [ -f "$NOTREADY" ] && since=$(cat "$NOTREADY" 2>/dev/null)
+        need_stamp=0
+        case "$since" in
+          "" | *[!0-9]*) need_stamp=1 ;;
+          *)
+            # Longer than 10 digits would overflow the shell's signed arithmetic
+            # and could read as negative, which no comparison here would catch.
+            if [ ''${#since} -gt 10 ]; then
+              need_stamp=1
+            else
+              since=$(( 10#$since ))
+              # A marker written by the previous revision holds wall-clock seconds
+              # (about 1.7e9) against an uptime of about 3.5e5, so it lands here
+              # and is re-stamped once rather than trusted.
+              if [ "$since" -gt "$now" ]; then need_stamp=1; fi
+            fi
+            ;;
+        esac
+        if [ "$need_stamp" -eq 1 ]; then
+          since=$now
+          # Written to a per-writer temporary file and renamed: a reader that
+          # takes no lock (the socket-missing branch) must never see a truncated
+          # marker, which would look like "no marker yet" and grant a fresh grace.
+          # mktemp, not a fixed name, because the watchdog's unlocked branch and
+          # the trimmer can write at the same time; a shared temp name would let
+          # one writer's rename make the other's fail and fail that unit.
+          stamp_tmp=$(${pkgs.coreutils}/bin/mktemp "$NOTREADY.XXXXXX") || stamp_tmp=""
+          if [ -z "$stamp_tmp" ] ||
+             ! printf '%s\n' "$now" > "$stamp_tmp" ||
+             ! ${pkgs.coreutils}/bin/mv -f "$stamp_tmp" "$NOTREADY"; then
+            if [ -n "$stamp_tmp" ]; then ${pkgs.coreutils}/bin/rm -f "$stamp_tmp"; fi
+            # Without a marker the grace would restart on every pass and the
+            # outage would never be reported, so a failed write fails the pass.
+            echo "$1: cannot record the not-ready time in $NOTREADY" >&2
+            return 1
+          fi
+        fi
+        if [ $(( now - since )) -ge "$NOTREADY_GRACE" ]; then return 1; fi
+        echo "$1: server not ready; excused for another $(( NOTREADY_GRACE - (now - since) ))s" >&2
+        return 0
+      }
+      server_ready() { rm -f "$NOTREADY"; }
+      if [ ! -S "$SOCK" ]; then
+        excused_while_not_ready tmux-admin-tap && exit 0
+        echo "tmux-admin-tap: no socket at $SOCK and the server has not recovered" >&2
+        exit 1
+      fi
       recreated=0
-      REBUILD=/run/tmux-share.rebuild
       if [ ! -e "$LOG" ]; then
         # Recreate it, and note that recreating alone changes nothing: the panes'
         # writer still holds the unlinked inode, and no attach command
@@ -2783,19 +2854,45 @@ if __name__ == "__main__":
         recreated=1
       fi
       # Bounded wait, 0600 lock: see the note on the startup tap.
-      ( umask 077; : > /run/tmux-share.lock )
-      ${pkgs.coreutils}/bin/chmod 0600 /run/tmux-share.lock
-      exec 9>/run/tmux-share.lock
+      ( umask 077; : > "$LOCK" )
+      ${pkgs.coreutils}/bin/chmod 0600 "$LOCK"
+      exec 9>"$LOCK"
       ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
         { echo "tmux-admin-tap: the tap lock is busy; skipping this pass" >&2; exit 1; }
       # Every tmux call is bounded: a server that accepts connections but stops
       # answering would otherwise block while this holds the shared lock.
       # #{pane_pipe} is fetched in the same call so the decision to attach is
       # based on real state: `pipe-pane -o` is a toggle, not "attach if absent".
-      if ! panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id} #{pane_pipe}'); then
-        echo "tmux-admin-tap: cannot list panes (refused, wedged or too slow)" >&2
+      # stderr goes to a file rather than into `$panes`: merging it would feed
+      # tmux's error text to the pane loop as if it were pane IDs. The file lives
+      # beside the transcript, in a root-owned directory the group can traverse
+      # but not write, so no unprivileged account can pre-place a symlink there.
+      ERR=$(${pkgs.coreutils}/bin/mktemp "''${LOG%/*}/.tap-err.XXXXXX") || exit 1
+      rc=0
+      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id} #{pane_pipe}' 2>"$ERR") || rc=$?
+      why=""
+      if [ -s "$ERR" ]; then why=$(${pkgs.coreutils}/bin/cat "$ERR"); fi
+      ${pkgs.coreutils}/bin/rm -f "$ERR"
+      if [ "$rc" -ne 0 ]; then
+        # Exit 1 with one of tmux's "nothing to talk to" messages, while the
+        # server may still be starting, is a skipped pass rather than a failure.
+        # Anything else stays an error: 127 means the bounded command itself could
+        # not run, and a server that is missing long after the unit came up means
+        # the session is gone.
+        excused=1
+        if [ "$rc" -eq 1 ]; then
+          case "$why" in
+            *"no server running on"*|*"can't find session"*|*"can't find window"*|*"No such file or directory"*|*"Connection refused"*|*"server exited unexpectedly"*)
+              excused_while_not_ready tmux-admin-tap && excused=0 ;;
+          esac
+        fi
+        if [ "$excused" -eq 0 ]; then
+          exit 0
+        fi
+        echo "tmux-admin-tap: cannot list panes (exit $rc): $why" >&2
         exit 1
       fi
+      server_ready
       rebuilt=1
       while read -r pane has; do
         [ -n "$pane" ] || continue
@@ -2862,14 +2959,78 @@ if __name__ == "__main__":
     };
     script = ''
       set -eu
-      LOG=/run/tmux-share/admin.log
+      LOG=''${TMUX_ADMIN_LOG:-/run/tmux-share/admin.log}
       NEW=$LOG.new
-      SOCK=/run/tmux-share/admin.sock
-      TMUX=${pkgs.tmux}/bin/tmux
-      TO=${pkgs.coreutils}/bin/timeout
+      SOCK=''${TMUX_ADMIN_SOCK:-/run/tmux-share/admin.sock}
+      LOCK=''${TMUX_ADMIN_LOCK:-/run/tmux-share.lock}
+      TMUX=''${TMUX_ADMIN_TMUX:-${pkgs.tmux}/bin/tmux}
+      TO=''${TMUX_ADMIN_TIMEOUT:-${pkgs.coreutils}/bin/timeout}
       [ -f "$LOG" ] || exit 0
       size=$(${pkgs.coreutils}/bin/stat -c %s "$LOG")
       [ "$size" -gt 4194304 ] || exit 0
+      # How long has the server been unusable? A not-ready server is excused for
+      # NOTREADY_GRACE seconds counted from the first pass that saw it not ready
+      # (not from the unit's start time),
+      # so an activation race or a short restart is quiet while a server that stays
+      # down is reported once the grace expires. A flapping server is NOT reported
+      # if a tick lands in one of its up-windows: a successful pass clears the
+      # marker. That is the price of not failing healthy restarts. The stamp is a plain file
+      # beside the transcript in the root-owned directory; no systemd query is
+      # involved, so there is no second clock to disagree with.
+      NOTREADY=''${LOG%/*}/.notready-since
+      NOTREADY_GRACE=300
+      excused_while_not_ready() {
+        # /proc/uptime, not wall time: a clock step cannot move it, and it cannot
+        # read higher than a later reading within a boot, and the `since > now`
+        # test below is the guard for anything that did. /run is tmpfs, so a
+        # reboot clears the marker along with the transcript it belongs to.
+        now=$(${pkgs.coreutils}/bin/cut -d. -f1 /proc/uptime) || now=""
+        case "$now" in
+          "" | *[!0-9]*) echo "$1: cannot read /proc/uptime; not excusing" >&2; return 1 ;;
+        esac
+        since=""
+        [ -f "$NOTREADY" ] && since=$(cat "$NOTREADY" 2>/dev/null)
+        need_stamp=0
+        case "$since" in
+          "" | *[!0-9]*) need_stamp=1 ;;
+          *)
+            # Longer than 10 digits would overflow the shell's signed arithmetic
+            # and could read as negative, which no comparison here would catch.
+            if [ ''${#since} -gt 10 ]; then
+              need_stamp=1
+            else
+              since=$(( 10#$since ))
+              # A marker written by the previous revision holds wall-clock seconds
+              # (about 1.7e9) against an uptime of about 3.5e5, so it lands here
+              # and is re-stamped once rather than trusted.
+              if [ "$since" -gt "$now" ]; then need_stamp=1; fi
+            fi
+            ;;
+        esac
+        if [ "$need_stamp" -eq 1 ]; then
+          since=$now
+          # Written to a per-writer temporary file and renamed: a reader that
+          # takes no lock (the socket-missing branch) must never see a truncated
+          # marker, which would look like "no marker yet" and grant a fresh grace.
+          # mktemp, not a fixed name, because the watchdog's unlocked branch and
+          # the trimmer can write at the same time; a shared temp name would let
+          # one writer's rename make the other's fail and fail that unit.
+          stamp_tmp=$(${pkgs.coreutils}/bin/mktemp "$NOTREADY.XXXXXX") || stamp_tmp=""
+          if [ -z "$stamp_tmp" ] ||
+             ! printf '%s\n' "$now" > "$stamp_tmp" ||
+             ! ${pkgs.coreutils}/bin/mv -f "$stamp_tmp" "$NOTREADY"; then
+            if [ -n "$stamp_tmp" ]; then ${pkgs.coreutils}/bin/rm -f "$stamp_tmp"; fi
+            # Without a marker the grace would restart on every pass and the
+            # outage would never be reported, so a failed write fails the pass.
+            echo "$1: cannot record the not-ready time in $NOTREADY" >&2
+            return 1
+          fi
+        fi
+        if [ $(( now - since )) -ge "$NOTREADY_GRACE" ]; then return 1; fi
+        echo "$1: server not ready; excused for another $(( NOTREADY_GRACE - (now - since) ))s" >&2
+        return 0
+      }
+      server_ready() { rm -f "$NOTREADY"; }
       # Close every tap, write the tail to a new file, then rename it into place.
       # Rename is atomic, so a straggler that was mid-flush ends up on the
       # unlinked inode (losing at most its last bytes) instead of tearing the new
@@ -2878,15 +3039,34 @@ if __name__ == "__main__":
       # (which only attaches where `#{pane_pipe}` is 0) would not notice, so the
       # transcript would freeze until the server restarted. The lock stops the
       # watchdog re-tapping mid-trim.
-      ( umask 077; : > /run/tmux-share.lock )
-      ${pkgs.coreutils}/bin/chmod 0600 /run/tmux-share.lock
-      exec 9>/run/tmux-share.lock
+      ( umask 077; : > "$LOCK" )
+      ${pkgs.coreutils}/bin/chmod 0600 "$LOCK"
+      exec 9>"$LOCK"
       ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
         { echo "tmux-admin-logtrim: the tap lock is busy; skipping this trim" >&2; exit 1; }
-      if ! panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id}'); then
-        echo "tmux-admin-logtrim: cannot enumerate panes; not trimming" >&2
+      ERR=$(${pkgs.coreutils}/bin/mktemp "''${LOG%/*}/.trim-err.XXXXXX") || exit 1
+      rc=0
+      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id}' 2>"$ERR") || rc=$?
+      why=""
+      if [ -s "$ERR" ]; then why=$(${pkgs.coreutils}/bin/cat "$ERR"); fi
+      ${pkgs.coreutils}/bin/rm -f "$ERR"
+      if [ "$rc" -ne 0 ]; then
+        # Same rule as the watchdog: nothing to trim while the server is not up
+        # yet, but a server that vanished is a fault worth reporting.
+        excused=1
+        if [ "$rc" -eq 1 ]; then
+          case "$why" in
+            *"no server running on"*|*"can't find session"*|*"can't find window"*|*"No such file or directory"*|*"Connection refused"*|*"server exited unexpectedly"*)
+              excused_while_not_ready tmux-admin-logtrim && excused=0 ;;
+          esac
+        fi
+        if [ "$excused" -eq 0 ]; then
+          exit 0
+        fi
+        echo "tmux-admin-logtrim: cannot enumerate panes (exit $rc): $why" >&2
         exit 1
       fi
+      server_ready
       closed=1
       for pane in $panes; do
         if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane"; then
