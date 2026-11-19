@@ -16,6 +16,17 @@ let
     assert lib.versionAtLeast package.version "2.1.293";
     package;
   nookbridge = pkgs.callPackage ../../../packages/nookbridge.nix { inherit inputs; };
+  # Upstream release build: the packaged client is too old for Signal's servers,
+  # which refuse both to link it and to open a store written by a newer one.
+  # The release jars need the newer runtime: the default jre in both channels is
+  # Java 21 and the 0.14.10 classes are built for 25, which fails at startup with
+  # UnsupportedClassVersionError rather than at build time.
+  signalCli = pkgs.callPackage ../../../packages/signal-cli.nix {
+    jre_headless = pkgs-unstable.jdk25_headless;
+  };
+  # The linked account is identified by its ACI: linking a secondary device does
+  # not record a phone number locally.
+  signalAccountAci = "ed6c7b7f-db54-4e3e-9580-facbc171b764";
   opencode-v2 = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-v2;
   opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
   opencode-goal-plugin = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-goal-plugin;
@@ -679,11 +690,11 @@ in
     opencode-api
     oc-tier
     graphviz
-    # Signal lane: the CLI carries registration, the account key store and the
-    # JSON-RPC daemon the Hermes signal platform talks to. It is a system
-    # package so registration can be run by hand; the daemon (a later change)
-    # references the store path directly and does not depend on PATH.
-    signal-cli
+    # Signal lane: the released client, not the nixpkgs build. Signal's servers
+    # reject the older packaged version, and it cannot open an account store
+    # written by a newer client, so the daemon and the interactive CLI must be
+    # the same one. The daemon locates that store through HOME, not through PATH.
+    signalCli
     tmux
     # Root-only attach for the dedicated, monitored admin tmux server. The
     # wrapper refuses non-root callers so the socket never gains a second
@@ -1897,6 +1908,43 @@ if __name__ == "__main__":
         -exec ${pkgs.coreutils}/bin/chown hermes:users {} + \
         -exec ${pkgs.coreutils}/bin/chmod 2750 {} +
     '';
+  };
+
+  # Signal transport. The Hermes signal platform talks JSON-RPC to this daemon
+  # over loopback; the daemon's HTTP server has no authentication of its own, so
+  # it is bound to 127.0.0.1 and nothing else on the network can reach it. That
+  # is not the same as being private: any process running as this host's users
+  # (including agent tool runs) can open the socket and act as the assistant.
+  # The account itself is the linked device store in the operator's home
+  # directory, and only one process may hold it — run CLI commands through the
+  # daemon rather than starting a second client against the same account.
+  systemd.services.signal-cli-daemon = {
+    description = "signal-cli JSON-RPC daemon for the assistant's Signal account";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" ];
+    after = [ "network-online.target" ];
+    environment = {
+      HOME = "/var/lib/hermes";
+    };
+    serviceConfig = {
+      User = "hermes";
+      Group = "users";
+      WorkingDirectory = "/var/lib/hermes";
+      ExecStart = "${signalCli}/bin/signal-cli -a ${signalAccountAci} daemon --http 127.0.0.1:18081";
+      Restart = "on-failure";
+      RestartSec = 10;
+      UMask = "0077";
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+    };
+    # Without the account store the client exits non-zero on every start, so an
+    # unguarded restart loop would retry forever and fill the journal:
+    # ConditionPathExists stops the missing-store case outright, and the start
+    # limit stops a store that exists but is unusable (wrong or re-linked ACI).
+    # These are [Unit] settings, not [Service] ones, so they belong at this level.
+    startLimitIntervalSec = 300;
+    startLimitBurst = 5;
+    unitConfig.ConditionPathExists = "/var/lib/hermes/.local/share/signal-cli/data/accounts.json";
   };
 
   systemd.services.hermes-control-dir-mode = {
