@@ -679,6 +679,11 @@ in
     opencode-api
     oc-tier
     graphviz
+    # Signal lane: the CLI carries registration, the account key store and the
+    # JSON-RPC daemon the Hermes signal platform talks to. It is a system
+    # package so registration can be run by hand; the daemon (a later change)
+    # references the store path directly and does not depend on PATH.
+    signal-cli
     tmux
     # Root-only attach for the dedicated, monitored admin tmux server. The
     # wrapper refuses non-root callers so the socket never gains a second
