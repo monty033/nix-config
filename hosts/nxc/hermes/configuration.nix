@@ -430,6 +430,46 @@ let
       cat ${config.sops.secrets."forgejo-token".path}
     fi
   '';
+
+  # Timestamp filter for the tmux transcript tap. tmux copies raw terminal
+  # bytes, and a line-based tool cannot work on that stream: a prompt has no
+  # newline, so the tool either delays it until the next line arrives or splits
+  # escape sequences. This reproduces the pane's bytes and inserts a stamp
+  # between bursts only: one when output resumes after an idle gap, so a busy
+  # stream carries one stamp at its start rather than one per second. It blocks
+  # on read, so it uses no CPU while the pane is quiet.
+  tmuxTapStamp = pkgs.writeScriptBin "tmux-tap-stamp" ''
+    #!${pkgs.python3}/bin/python3
+    import os
+    import sys
+    import time
+
+    GAP = 1.0
+    out = sys.stdout.buffer
+    fd = sys.stdin.fileno()
+    last = None
+    while True:
+        try:
+            data = os.read(fd, 65536)
+        except OSError as exc:
+            print("tmux-tap-stamp: read failed: %s" % exc, file=sys.stderr)
+            sys.exit(1)
+        if not data:
+            break
+        # The gap is measured between chunks, not between stamps: a stream that
+        # never pauses is one burst however long it runs.
+        now = time.monotonic()
+        if last is None or now - last >= GAP:
+            stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            out.write(b"\r\n[" + stamp.encode() + b"] ")
+        out.write(data)
+        out.flush()
+        # Advance the clock after the write so a blocked write does not stamp the
+        # moment it resumes. The cost: if the pane stays quiet while this filter's
+        # write of its last chunk is blocked, that quiet goes unstamped, because
+        # the filter cannot see silence that overlaps its own write.
+        last = time.monotonic()
+  '';
 in
 
 {
@@ -2599,7 +2639,7 @@ if __name__ == "__main__":
             # No -o here: a fresh server has no pipe on this pane, and -o is a
             # toggle on an existing pipe rather than a no-op (measured on 3.7b:
             # a second -o closed the pipe and output stopped).
-            ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" pipe-pane -t admin "exec ${pkgs.coreutils}/bin/cat >> $LOG"
+            ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" pipe-pane -t admin "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG"
             exit 0
           fi
           i=$((i + 1))
@@ -2638,7 +2678,7 @@ if __name__ == "__main__":
       REBUILD=/run/tmux-share.rebuild
       if [ ! -e "$LOG" ]; then
         # Recreate it, and note that recreating alone changes nothing: the panes'
-        # `cat >> admin.log` still hold the unlinked inode, and no attach command
+        # writer still holds the unlinked inode, and no attach command
         # can move them, so the taps below are retired explicitly. The marker is
         # written here, before the lock, because this pass can still exit early
         # (busy lock, tmux not answering) and a later pass that sees only a
@@ -2682,7 +2722,7 @@ if __name__ == "__main__":
         # Report failures: a tap that silently refuses to attach looks exactly
         # like an idle pane in the transcript.
         if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane" \
-          "exec ${pkgs.coreutils}/bin/cat >> $LOG"; then
+          "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG"; then
           echo "tmux-admin-tap: could not attach the tap to $pane" >&2
           rebuilt=0
         fi
@@ -2774,7 +2814,7 @@ if __name__ == "__main__":
           [ -n "$pane" ] || continue
           [ "$has" = 1 ] && continue
           "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane" \
-            "exec ${pkgs.coreutils}/bin/cat >> $LOG" ||
+            "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG" ||
             echo "tmux-admin-logtrim: could not reopen the tap on $pane" >&2
         done <<< "$now"
         exit "$rc"
