@@ -5,6 +5,7 @@
 
   home.packages = with pkgs; [
     google-chrome
+    zoom-us
   ];
 
   programs.plasma = {
