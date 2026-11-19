@@ -2016,7 +2016,53 @@ if __name__ == "__main__":
     };
   };
 
+  # The hourly failure collector is now the only path cron failures travel, so a
+  # stopped loop and a clean day both look like silence. This unit reads two
+  # signals from outside the agent -- the collector's heartbeat file and the
+  # gateway's /health -- and messages the owner on Telegram when either breaks.
+  # It runs from a timer rather than from cron because cron is the thing being
+  # watched: a wedged gateway must not be able to suppress its own alarm. The
+  # script keeps its own repeat window (one alert per problem kind per six
+  # hours) and announces a recovery once the problems have stayed clear.
+  systemd.services.hermes-host-watchdog = {
+    description = "Alert when the Hermes failure collector or gateway stops";
+    after = [ "sops-install-secrets.service" ];
+    wants = [ "sops-install-secrets.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = "hermes";
+      Group = "users";
+      # TELEGRAM_BOT_TOKEN for the alert. systemd reads the decrypted secret
+      # directly, so the token never enters Nix, the store or a command line.
+      EnvironmentFile = config.sops.secrets."agent-env".path;
+      ExecStart = "${pkgs.python3}/bin/python3 ${./files/host-watchdog.py}";
+      # The script only reads two files and makes one HTTPS request; it has no
+      # reason to write anywhere except its own state directory.
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      ProtectSystem = "strict";
+      ReadWritePaths = [ "/var/lib/hermes/.hermes/state" ];
+      # AF_NETLINK is needed by name resolution paths that enumerate interfaces.
+      RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK" ];
+    };
+  };
+
+  systemd.timers.hermes-host-watchdog = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      # The heartbeat is old after any reboot; the script decides when a stale
+      # one is explained by the boot itself (uptime below one window AND the run
+      # predates the boot). Nothing here suppresses that check.
+      OnBootSec = "10min";
+      OnUnitActiveSec = "15min";
+    };
+  };
+
   systemd.tmpfiles.rules = [
+    # The watchdog writes its de-dup state here, and ReadWritePaths on a path
+    # that does not exist yet is ignored, so the directory must pre-exist or
+    # every watchdog run fails with exit 3.
+    "d /var/lib/hermes/.hermes/state 0750 hermes users -"
     # Monitored admin tmux server. The directory is traversable by the
     # tmux-share group but not listable; the socket inside it stays owner-only
     # root:root (tmux's own default), so group membership never buys a
