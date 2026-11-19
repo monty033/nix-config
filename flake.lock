@@ -48,16 +48,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1794788392,
-        "narHash": "sha256-P5mKdo6D05c2lABdDvV50a1m2HXx4I0Fqp1mfZmahXc=",
+        "lastModified": 1794930037,
+        "narHash": "sha256-7HTAH/ONOIkXXe0BD2uPyehYZzzwV2jKlbahst7laFA=",
         "ref": "refs/heads/main",
-        "rev": "cde2356dfa89a1cdca3f2aa767da477ca4349857",
-        "revCount": 10,
+        "rev": "1fbb4ef333475a0b237b579bec5e68f6fad9303e",
+        "revCount": 11,
         "type": "git",
         "url": "https://git.montycasa.net/patrick/heimdall"
       },
       "original": {
-        "rev": "cde2356dfa89a1cdca3f2aa767da477ca4349857",
+        "rev": "1fbb4ef333475a0b237b579bec5e68f6fad9303e",
         "type": "git",
         "url": "https://git.montycasa.net/patrick/heimdall"
       }
@@ -218,16 +218,16 @@
     "nookbridge": {
       "flake": false,
       "locked": {
-        "lastModified": 1794875342,
-        "narHash": "sha256-N8+siw3qCLosiaeljG36nQnfGwJa1n/TAssitcJPh68=",
+        "lastModified": 1794969493,
+        "narHash": "sha256-VVYna2jb/JJ1DBrw7eYonkFNkqgD0FRNKeyTqa08B+c=",
         "ref": "refs/heads/main",
-        "rev": "91821b8bad3fc4e5d2d12249733476edcf143647",
-        "revCount": 735,
+        "rev": "ebc3dc8ebd0fc2109848b836dbeff9338bd46688",
+        "revCount": 746,
         "type": "git",
         "url": "https://git.montycasa.net/patrick/NookBridge"
       },
       "original": {
-        "rev": "91821b8bad3fc4e5d2d12249733476edcf143647",
+        "rev": "ebc3dc8ebd0fc2109848b836dbeff9338bd46688",
         "type": "git",
         "url": "https://git.montycasa.net/patrick/NookBridge"
       }

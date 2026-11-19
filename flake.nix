@@ -239,19 +239,42 @@
     # body be decided by its own visibility and lock signals instead of being
     # withheld as undecidable.
     #
-    # This revision is 2 commits after the previous pin (revCount 733 to 735)
-    # and is the merge of #309, which lets a note that has a title and no body
-    # be deleted. Core reads rows with `select *`, so such a note carries
-    # `contentId: null`; the write projection rejected that as a malformed
-    # identifier before the revision, lock and conflict guards ran, so a note
+    # The pin before this one `91821b8` was 2 commits after its own predecessor
+    # (revCount 733 to 735) and was the merge of #309, which lets a note that has
+    # a title and no body be deleted. Core reads rows with `select *`, so such a
+    # note carries `contentId: null`; the write projection rejected that as a
+    # malformed identifier before the revision, lock and conflict guards ran, so a note
     # `notes.get` served could not be trashed. Metadata-only edits on such a
     # note now work too. Before an absent body is read as unlocked the seam
     # queries the note's incoming relations — the direction core stores a Vault
     # lock in — so a Vault-linked note, or an unanswerable probe, still refuses
     # with `vault_locked`, and a note naming a content row that has not arrived
     # refuses with `sync_required`.
+    #
+    # The pin before this one `c1871cda` was 2 commits after its own predecessor
+    # (revCount 735 to 737) and was the merge of #311, which makes a Vault link
+    # lock a note even when the note has a readable content row. Core stores the
+    # lock as a `vault -> note` relation rather than a column, so a content
+    # record reading `locked: false`, or carrying no marker, is no longer proof
+    # that the note is unlocked; discovery, `notes.get` and the write seam
+    # consult the incoming relation.
+    #
+    # Earlier pin `59a4c203c569f3332e79d9709e46ed87d8c53f05`: 2 commits after
+    # its own predecessor (revCount 737 to 739). It was the merge of #313,
+    # which stops the operator path diagnostic from describing a locked note's
+    # body. That diagnostic reports body shape, and it decided from the stored
+    # content record's own marker, so a note the vault has linked was still
+    # described whenever the record read `locked: false`; it now asks the same
+    # lock rule as discovery, `notes.get` and the write seam, and refuses.
+    #
+    # This revision is 7 commits after the previous pin (revCount 739 to 746)
+    # and is the merge of #314, which makes a recovery leave state the service
+    # user can open and lets live login read the systemd credential key. Fresh
+    # members created by a reinitialize now take the state root's owner instead
+    # of the operator's, and the auth commands read the key from the systemd
+    # credential slot rather than a development key file beside the state.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=91821b8bad3fc4e5d2d12249733476edcf143647";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=ebc3dc8ebd0fc2109848b836dbeff9338bd46688";
       flake = false;
     };
 
@@ -269,7 +292,7 @@
     # is the only thing on the network permitted to read switch state, so what
     # runs is exactly what was reviewed, not whatever main happens to be.
     heimdall = {
-      url = "git+https://git.montycasa.net/patrick/heimdall?rev=cde2356dfa89a1cdca3f2aa767da477ca4349857";
+      url = "git+https://git.montycasa.net/patrick/heimdall?rev=1fbb4ef333475a0b237b579bec5e68f6fad9303e";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
