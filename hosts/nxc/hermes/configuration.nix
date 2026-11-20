@@ -2843,16 +2843,21 @@ if __name__ == "__main__":
   # session name is the operator's, the file names are the reader's contract.
   #
   # The agent gets a read-only VIEW, not a connection. That distinction is the
-  # whole point: tmux's read-only mode is a client flag, not an authorisation
-  # boundary. `server-access -a -r <user>` stops that user's attached client
-  # from typing into a pane, but the same user can open a second,
-  # non-interactive client and run `send-keys`, `kill-session`, `set-option` or
-  # `run-shell` — and `run-shell` executes as the server's owner, which here is
-  # root. tmux.1 says the same: the access list defaults to empty and exists
-  # because "these permissions must be changed manually", with the warning not
-  # to grant access even read-only to untrusted users.
+  # whole point: a socket connection, even one the access list marks read-only,
+  # is an authorisation surface rather than a boundary. `server-access -a -r
+  # <user>` is a real check -- tmux applies the access list to every accepted
+  # connection and a read-only client is refused any command not marked
+  # read-only, which covers `run-shell`, `kill-session` and `set-option` -- but
+  # `send-keys` IS marked read-only, so a connect-capable account could still
+  # type into the operator's shell. The access list exists because tmux.1 warns
+  # against granting access even read-only to untrusted users, and it is
+  # unreachable here anyway: the socket is owner-only, so `hermes` cannot
+  # connect at all. It is kept as defence in depth, not relied on as the
+  # boundary.
   #
-  # So the socket keeps tmux's default owner-only mode (0700 root:root here) and
+  # So the socket keeps tmux's owner-only mode for a dedicated socket
+  # (0600 root:root here; the default socket is 0660, protected by a 0700
+  # parent directory) and
   # the `tmux-share` group carries no socket access at all. The server taps
   # every pane of the `tmux-hermes` session into admin.log (0640 root:tmux-share) and
   # the agent reads that file. Consequence: sending keys, executing commands or
@@ -3155,6 +3160,11 @@ if __name__ == "__main__":
     timerConfig = {
       OnBootSec = "20s";
       OnUnitActiveSec = "20s";
+      # One second, not systemd's one-minute default. The gap between ticks is
+      # what output can be missed when a pane is replaced, so the window is the
+      # interval plus the accuracy: "every 20 seconds" is really anywhere up to
+      # about 80 at the default, and about 21 here.
+      AccuracySec = "1s";
       Unit = "tmux-admin-tap.service";
     };
   };
@@ -3342,6 +3352,8 @@ if __name__ == "__main__":
     timerConfig = {
       OnBootSec = "5min";
       OnUnitActiveSec = "5min";
+      # Same one-minute-default trap as the tap.
+      AccuracySec = "1s";
       Unit = "tmux-admin-logtrim.service";
     };
   };
