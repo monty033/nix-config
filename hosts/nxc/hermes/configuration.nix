@@ -1571,6 +1571,53 @@ in
   # adapter retries regardless, so this only keeps the journal honest.
   systemd.services.hermes-agent.after = [ "sops-install-secrets.service" "signal-cli-daemon.service" ];
 
+  # Signal's conversation route (Haiku, falling back through the global chain to
+  # the reseller's DeepSeek Flash) cannot be declared in `platforms.signal`:
+  # Hermes has no per-platform model default, so the only lever is
+  # `channel_overrides`, keyed by the chat id -- and a YAML key is never expanded
+  # from the environment. A Signal DM's chat id is the peer's account UUID, the
+  # same value the DM allowlist holds, and this repository is published to
+  # GitHub. The id therefore stays in the encrypted environment file and this
+  # unit republishes it into the admin config layer at boot: /etc/hermes/config.yaml
+  # is generated on the host, readable by the gateway's group, and never
+  # committed. The admin layer wins at the leaf, so it sets the route for that
+  # conversation and leaves every other setting alone.
+  # The unit is intentionally not required by hermes-agent: if the secret is
+  # missing or an id is malformed, Signal falls back to the global default route
+  # and the failed unit is the signal, rather than the gateway refusing to start.
+  systemd.services.hermes-managed-scope = {
+    description = "Publish the Signal conversation route into the Hermes admin config layer";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "hermes-agent.service" ];
+    after = [ "sops-install-secrets.service" ];
+    restartTriggers = [ ./files/signal-managed-scope.py ];
+    environment = {
+      SIGNAL_MODEL = "claude-haiku-5-5";
+      SIGNAL_PROVIDER = "claude-subscription-directsdk-experimental";
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 ${./files/signal-managed-scope.py}";
+      # The Signal allowlist, decrypted at boot; the script reads those ids out of
+      # it and writes them into the admin scope.
+      EnvironmentFile = config.sops.secrets."hermes-signal-env".path;
+      UMask = "0027";
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      ProtectSystem = "strict";
+      # The `-` prefix keeps the unit startable on a host where the admin-scope
+      # directory is absent (a fresh install, or after a stray rm): the directory
+      # is created by tmpfiles above, so this only matters during the window
+      # before tmpfiles has run.
+      ReadWritePaths = [ "-/etc/hermes" ];
+    };
+  };
+  # `before=` is ordering within one transaction; this makes any later start of the
+  # agent pull the scope unit too, so a manual start cannot run the gateway against
+  # a stale admin scope.
+  systemd.services.hermes-agent.wants = [ "hermes-managed-scope.service" ];
+
   # Fix file ownership after nix rebuilds. The activation script chowns
   # directories but not individual files — if anything runs as root and
   # touches a file under .hermes/ (e.g. cron/jobs.json during a service
@@ -2060,6 +2107,10 @@ if __name__ == "__main__":
   };
 
   systemd.tmpfiles.rules = [
+    # The admin config layer written by hermes-managed-scope. `ReadWritePaths`
+    # on a path that does not exist yet is ignored, so the directory must exist
+    # before the unit starts.
+    "d /etc/hermes 0755 root root -"
     # The watchdog writes its de-dup state here, and ReadWritePaths on a path
     # that does not exist yet is ignored, so the directory must pre-exist or
     # every watchdog run fails with exit 3.
