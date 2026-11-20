@@ -927,7 +927,26 @@ in
     #
     # The same applies to the discovery-time provider check the dashboard
     # performs (see systemd.services.hermes-dashboard.path below).
-    extraPackages = [ claudeCodeForHermes pkgs.gnupg ];
+    #
+    # python3 is here because the quick commands and the terminal tool both run
+    # scripts whose shebang is `#!/usr/bin/env python3`. With no interpreter on
+    # this PATH those fail with `env: 'python3': No such file or directory`
+    # before the script starts — an error that reads like a missing file rather
+    # than a missing PATH entry, so it is easy to misdiagnose.
+    #
+    # It is python312 deliberately, not pkgs.python3: this unit also exports a
+    # PYTHONPATH of 3.12 site-packages built from extraPythonPackages, and a
+    # 3.13 interpreter would inherit it. Pure-Python imports would keep working
+    # while compiled ones (mmh3, sqlite-vec, pystemmer) fail, which is a worse
+    # and rarer failure than the one being fixed. Verified: with the unit's own
+    # PYTHONPATH, python312 imports mmh3, sqlite_vec and Stemmer (pystemmer)
+    # cleanly, and one of the five scripts that had been failing ran to
+    # completion under the rendered PATH as the hermes user.
+    #
+    # The dashboard has its own `path` and runs no quick commands, so it needs
+    # no matching entry; scripts needing Hermes' own runtime are still run by
+    # the agent rather than from PATH.
+    extraPackages = [ claudeCodeForHermes pkgs.gnupg pkgs.python312 ];
     extraPythonPackages = [
       mnemosyneMemory
       mnemosyneHermes
