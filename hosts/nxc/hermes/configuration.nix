@@ -620,6 +620,11 @@ in
       # without these two it looks like the deploy did nothing.
       (builtins.toJSON config.services.hermes-agent.settings.plugins)
       (builtins.toJSON config.services.hermes-agent.settings.quick_commands)
+      # The media-delivery policy is bridged from config into the gateway's
+      # environment at startup, so an allowlist entry only takes effect on a
+      # restart — without this trigger a deploy would rewrite config.yaml while
+      # the running gateway kept refusing the same paths.
+      (builtins.toJSON config.services.hermes-agent.settings.gateway)
     ]
     ++ [
       (builtins.toJSON config.services.hermes-agent.settings.mcp_servers)
@@ -1439,6 +1444,22 @@ in
       # Allow-list is the operator account (user 748642877 = Monty).
       telegram = {
         reactions = false;
+      };
+
+      # Media delivery. Reports written to the cron output directory are
+      # referenced from a message with a MEDIA: line. The gateway trusts paths
+      # under its cache roots or this allowlist and only then consults its deny
+      # list, which matters here because this host's Hermes home sits under
+      # /var/lib — a deny prefix — so without the entry every file under the
+      # home outside the cache is refused. The message still arrives, and the
+      # refusal is a log warning rather than a delivery error the job reports,
+      # which is how the weekly package summary lost its attachment for weeks
+      # without anything looking broken. Matching is by subtree, so the dated
+      # and per-job subdirectories under this directory are covered too. The
+      # path is derived from stateDir so moving the home does not silently
+      # re-break delivery.
+      gateway = {
+        media_delivery_allow_dirs = [ "${config.services.hermes-agent.stateDir}/.hermes/cron/output" ];
       };
 
       platforms = {
