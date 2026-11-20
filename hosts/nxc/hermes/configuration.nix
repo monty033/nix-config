@@ -1463,6 +1463,10 @@ in
               "binary_sensor.away_mode"
               "sensor.pat_phone_next_alarm"
               "sensor.last_activity"
+              # The phone's own Android Auto connection. Watched so the agent knows
+              # whether Patrick is driving when it composes a message for him; no
+              # existing delivery target is changed by this.
+              "binary_sensor.pat_phone_android_auto"
             ];
             watch_all = false;
             cooldown_seconds = 10;
