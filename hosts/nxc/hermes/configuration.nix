@@ -1617,6 +1617,11 @@ in
   # agent pull the scope unit too, so a manual start cannot run the gateway against
   # a stale admin scope.
   systemd.services.hermes-agent.wants = [ "hermes-managed-scope.service" ];
+  # Rotating the id or the route changes the decrypted environment or the scope
+  # unit's own `environment`, and that unit re-reads both on every start, so no
+  # rebuild is needed -- but `RemainAfterExit` means the `wants` edge does not re-run
+  # it and `restartTriggers` only watches the script. Restart hermes-managed-scope
+  # first, then the agent.
 
   # Fix file ownership after nix rebuilds. The activation script chowns
   # directories but not individual files — if anything runs as root and
