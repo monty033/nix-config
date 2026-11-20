@@ -1460,7 +1460,9 @@ in
           extra = {
             url = "http://192.168.86.100:8123";
             watch_entities = [
-              "binary_sensor.away_mode"
+              # Away mode is an input_boolean. The previous id named a
+              # binary_sensor, which never resolved, so this entry was inert.
+              "input_boolean.away_mode"
               "sensor.pat_phone_next_alarm"
               "sensor.last_activity"
               # The phone's own Android Auto connection. Watched so the agent knows
