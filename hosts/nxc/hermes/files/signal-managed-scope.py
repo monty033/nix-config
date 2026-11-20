@@ -49,8 +49,9 @@ Environment
 Exit codes
 ----------
 0  written, or already current
-2  no usable id in the environment (nothing written)
-3  an id is not a UUID, or a file is unparseable / shaped unexpectedly
+2  the allowlist is unset or empty (nothing written)
+3  the allowlist is set with entries but none of them is a usable id, or a file
+   is unparseable / shaped unexpectedly (nothing is written in either case)
 4  the write failed
 5  the environment is incomplete or unsafe (no route, unknown provider, no group)
 """
