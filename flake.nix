@@ -602,6 +602,12 @@
       modules = commonModules ++ [ ./hosts/nxc/karakeep ];
     };
 
+    ## logseq ##
+    nixosConfigurations.logseq = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = commonModules ++ [ ./hosts/nxc/logseq ];
+    };
+
     ## ollama ##
     nixosConfigurations.ollama = nixpkgs.lib.nixosSystem {
       specialArgs = { inherit inputs; };
