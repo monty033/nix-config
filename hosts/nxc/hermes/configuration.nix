@@ -701,10 +701,10 @@ in
     # consumer by accident.
     (writeShellScriptBin "tmux-admin" ''
       if [ "$(${coreutils}/bin/id -u)" -ne 0 ]; then
-        echo "tmux-admin: root only (the shared admin server is not a general socket)" >&2
+        echo "tmux-admin: root only (the shared tmux-hermes server is not a general socket)" >&2
         exit 1
       fi
-      exec ${tmux}/bin/tmux -S /run/tmux-share/admin.sock attach -t admin "$@"
+      exec ${tmux}/bin/tmux -S /run/tmux-share/admin.sock attach -t tmux-hermes "$@"
     '')
     pkgs.jq
     pkgs.tesseract
@@ -2517,7 +2517,7 @@ if __name__ == "__main__":
     linger = true;
     # tmux-share grants read access to the monitored admin transcript only
     # (/run/tmux-share/admin.log). It carries no socket access — see the
-    # "Monitored tmux admin session" block below for why.
+    # "Monitored tmux session (tmux-hermes)" block below for why.
     extraGroups = [ "nookbridge-clients" "tmux-share" ];
   };
 
@@ -2664,9 +2664,11 @@ if __name__ == "__main__":
     };
   };
 
-  # ── Monitored tmux admin session ───────────────────────────────────────────
+  # ── Monitored tmux session (tmux-hermes) ───────────────────────────────────────────
   # A dedicated tmux server runs as root on /run/tmux-share/admin.sock, with a
-  # session called `admin` that the operator attaches to from a root shell.
+  # session called `tmux-hermes` that the operator attaches to from a root shell.
+  # The socket and transcript keep their `admin` file names deliberately: the
+  # session name is the operator's, the file names are the reader's contract.
   #
   # The agent gets a read-only VIEW, not a connection. That distinction is the
   # whole point: tmux's read-only mode is a client flag, not an authorisation
@@ -2680,7 +2682,7 @@ if __name__ == "__main__":
   #
   # So the socket keeps tmux's default owner-only mode (0700 root:root here) and
   # the `tmux-share` group carries no socket access at all. The server taps
-  # every pane of the `admin` session into admin.log (0640 root:tmux-share) and
+  # every pane of the `tmux-hermes` session into admin.log (0640 root:tmux-share) and
   # the agent reads that file. Consequence: sending keys, executing commands or
   # controlling the session is not merely forbidden, it is impossible without
   # root.
@@ -2693,13 +2695,14 @@ if __name__ == "__main__":
   # caveats, so this is not read as a complete record: output a pane produces
   # before the tap reaches it is lost (startup, up to one watchdog interval for
   # a pane opened later, and the moment a trim has the taps closed), and
-  # sessions other than `admin` are never tapped. The transcript also outlives
+  # sessions other than `tmux-hermes` are never tapped. The transcript also outlives
   # the pane: it stays readable until the trimmer reduces it or the host
   # reboots.
   #
   # The session's shells get this server's settings, not a login shell's:
   # fish as default-shell, the PATH above and TERM=tmux-256color. That is
-  # deliberate (a fish admin shell was requested) and scoped to this session;
+  # deliberate (a fish shell for the operator session was requested), scoped to
+  # this session;
   # no global shell or environment is changed.
   users.groups.tmux-share = { };
   # `hermes` is in `extraGroups` above. A process that is already running keeps
@@ -2718,7 +2721,7 @@ if __name__ == "__main__":
     set -g default-terminal "tmux-256color"
     set -g history-limit 50000
     set-environment -g PATH /run/current-system/sw/bin:/run/current-system/sw/sbin
-    new-session -d -s admin -c /root
+    new-session -d -s tmux-hermes -c /root
     # Defence in depth, NOT the boundary: if the socket mode is ever widened,
     # clients matching this user are read-only. It cannot stop send-keys or
     # run-shell from a connect-capable account.
@@ -2774,17 +2777,17 @@ if __name__ == "__main__":
           { echo "tmux-admin: the tap lock is busy; the watchdog will retry" >&2; exit 1; }
         i=0
         while [ "$i" -lt 100 ]; do
-          if ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" has-session -t admin 2>/dev/null; then
+          if ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" has-session -t tmux-hermes 2>/dev/null; then
             # No -o here: a fresh server has no pipe on this pane, and -o is a
             # toggle on an existing pipe rather than a no-op (measured on 3.7b:
             # a second -o closed the pipe and output stopped).
-            ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" pipe-pane -t admin "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG"
+            ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" pipe-pane -t tmux-hermes "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG"
             exit 0
           fi
           i=$((i + 1))
           ${pkgs.coreutils}/bin/sleep 0.1
         done
-        echo "tmux-admin: the admin session did not appear" >&2
+        echo "tmux-admin: the tmux-hermes session did not appear" >&2
         exit 1
       ''}";
     };
@@ -2802,7 +2805,7 @@ if __name__ == "__main__":
   # without disturbing a healthy tap. Panes share one transcript, so their output
   # interleaves.
   systemd.services."tmux-admin-tap" = {
-    description = "Keep the transcript tap attached to every pane of the admin session";
+    description = "Keep the transcript tap attached to every pane of the tmux-hermes session";
     # Ordering shapes the boot transaction and queued jobs during a switch; a tick
     # that still lands early is a skipped pass in the script below.
     after = [ "tmux-admin.service" ];
@@ -2915,7 +2918,7 @@ if __name__ == "__main__":
       # but not write, so no unprivileged account can pre-place a symlink there.
       ERR=$(${pkgs.coreutils}/bin/mktemp "''${LOG%/*}/.tap-err.XXXXXX") || exit 1
       rc=0
-      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id} #{pane_pipe}' 2>"$ERR") || rc=$?
+      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t tmux-hermes -F '#{pane_id} #{pane_pipe}' 2>"$ERR") || rc=$?
       why=""
       if [ -s "$ERR" ]; then why=$(${pkgs.coreutils}/bin/cat "$ERR"); fi
       ${pkgs.coreutils}/bin/rm -f "$ERR"
@@ -3092,7 +3095,7 @@ if __name__ == "__main__":
         { echo "tmux-admin-logtrim: the tap lock is busy; skipping this trim" >&2; exit 1; }
       ERR=$(${pkgs.coreutils}/bin/mktemp "''${LOG%/*}/.trim-err.XXXXXX") || exit 1
       rc=0
-      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin -F '#{pane_id}' 2>"$ERR") || rc=$?
+      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t tmux-hermes -F '#{pane_id}' 2>"$ERR") || rc=$?
       why=""
       if [ -s "$ERR" ]; then why=$(${pkgs.coreutils}/bin/cat "$ERR"); fi
       ${pkgs.coreutils}/bin/rm -f "$ERR"
@@ -3127,7 +3130,7 @@ if __name__ == "__main__":
         rc=$?
         # Re-read the real state rather than trusting the pre-close list: a
         # `pipe-pane -o` on a live pipe closes it instead of being a no-op.
-        now=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t admin \
+        now=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t tmux-hermes \
           -F '#{pane_id} #{pane_pipe}' 2>/dev/null || true)
         while read -r pane has; do
           [ -n "$pane" ] || continue
