@@ -696,12 +696,13 @@ in
     # the same one. The daemon locates that store through HOME, not through PATH.
     signalCli
     tmux
-    # Root-only attach for the dedicated, monitored admin tmux server. The
+    # Root-only attach for the dedicated, monitored tmux server. The
     # wrapper refuses non-root callers so the socket never gains a second
-    # consumer by accident.
-    (writeShellScriptBin "tmux-admin" ''
+    # consumer by accident. The command is named after the session the
+    # operator attaches to, not after the units that run it.
+    (writeShellScriptBin "tmux-hermes" ''
       if [ "$(${coreutils}/bin/id -u)" -ne 0 ]; then
-        echo "tmux-admin: root only (the shared tmux-hermes server is not a general socket)" >&2
+        echo "tmux-hermes: root only (the shared tmux-hermes server is not a general socket)" >&2
         exit 1
       fi
       exec ${tmux}/bin/tmux -S /run/tmux-share/admin.sock attach -t tmux-hermes "$@"
