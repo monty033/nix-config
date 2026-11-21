@@ -284,10 +284,17 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
-    # This revision `b98eb8bb906ff6d46bad6cf6fda8a615ada8a791` is 12 commits
-    # after the previous pin (revCount 746 to 758) and is the merge of #321.
+    # This revision `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3` is 3 commits
+    # after the previous pin `b98eb8bb906ff6d46bad6cf6fda8a615ada8a791`
+    # (revCount 758 to 761) and is the merge of #323, which enables live
+    # keep-both conflict resolve at the shipped entry point. The startup gate
+    # from #322 stays: a daemon started without `liveConflictResolve` still
+    # refuses both `notes.resolve-conflict` and `notes.abandon-resolve` with
+    # `service_unavailable`. That option is set inside NookBridge's
+    # `productionStartupOptions`, not here, so disabling the surface means an
+    # upstream change and a re-pin, not a host-side toggle.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=b98eb8bb906ff6d46bad6cf6fda8a615ada8a791";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=dcde2b58fe1104c8dcd7455d7ec409d6131abaa3";
       flake = false;
     };
 
