@@ -487,6 +487,7 @@ in
   imports = [
     (modulesPath + "/virtualisation/proxmox-lxc.nix")
     inputs.nix-hermes-agent.nixosModules.default
+    inputs.tmux-share.nixosModules.default
   ];
 
   nixpkgs.overlays = [
@@ -704,17 +705,10 @@ in
     # the same one. The daemon locates that store through HOME, not through PATH.
     signalCli
     tmux
-    # Root-only attach for the dedicated, monitored tmux server. The
-    # wrapper refuses non-root callers so the socket never gains a second
-    # consumer by accident. The command is named after the session the
-    # operator attaches to, not after the units that run it.
-    (writeShellScriptBin "tmux-hermes" ''
-      if [ "$(${coreutils}/bin/id -u)" -ne 0 ]; then
-        echo "tmux-hermes: root only (the shared tmux-hermes server is not a general socket)" >&2
-        exit 1
-      fi
-      exec ${tmux}/bin/tmux -S /run/tmux-share/admin.sock attach -t tmux-hermes "$@"
-    '')
+    # The attach command is not declared here: services.tmux-share installs
+    # `tmux-share`, which attaches to this host's server with the same
+    # root-or-owner gate the module enforces, so a locally declared wrapper
+    # would only be a second thing to keep in step.
     pkgs.jq
     pkgs.tesseract
     pkgs.rsync
@@ -2246,12 +2240,10 @@ if __name__ == "__main__":
     # that does not exist yet is ignored, so the directory must pre-exist or
     # every watchdog run fails with exit 3.
     "d /var/lib/hermes/.hermes/state 0750 hermes users -"
-    # Monitored admin tmux server. The directory is traversable by the
-    # tmux-share group but not listable; the socket inside it stays owner-only
-    # root:root (tmux's own default), so group membership never buys a
-    # connection. Only the transcript below is readable.
-    "d /run/tmux-share 0710 root tmux-share -"
-    "z /run/tmux-share/admin.log 0640 root tmux-share -"
+    # The monitored admin tmux server's directory, transcript and lock are
+    # declared by services.tmux-share: the module owns those modes and the
+    # ownership of the account it runs as, so repeating them here would be a
+    # second copy to keep in step.
     "d /var/lib/hermes/scripts 0755 hermes users -"
     # Rescue ISO build state, all root-owned except the trigger directory. The
     # agent may only create `/var/lib/rescue/in/request`; it can neither rename
@@ -2699,9 +2691,9 @@ if __name__ == "__main__":
   users.users.hermes = {
     linger = true;
     # tmux-share grants read access to the monitored admin transcript only
-    # (/run/tmux-share/admin.log). It carries no socket access — see the
-    # "Monitored tmux session (tmux-hermes)" block below for why.
-    extraGroups = [ "nookbridge-clients" "tmux-share" ];
+    # (/run/tmux-share/admin.log). It carries no socket access — services.tmux-share
+    # below explains why, and the module adds this account to the group itself.
+    extraGroups = [ "nookbridge-clients" ];
   };
 
   assertions = [
@@ -2847,527 +2839,102 @@ if __name__ == "__main__":
     };
   };
 
-  # ── Monitored tmux session (tmux-hermes) ───────────────────────────────────────────
-  # A dedicated tmux server runs as root on /run/tmux-share/admin.sock, with a
-  # session called `tmux-hermes` that the operator attaches to from a root shell.
-  # The socket and transcript keep their `admin` file names deliberately: the
-  # session name is the operator's, the file names are the reader's contract.
+  # ── Monitored tmux session (tmux-hermes) ───────────────────────────────────
+  # The feature lives in its own repository (tmux-share, pinned in flake.nix) and
+  # this host configures it instead of reimplementing it, so a fix lands once and
+  # reaches both the published module and this host. That is the whole reason for
+  # the switch: the two copies had already drifted on timer accuracy and on the
+  # read-only access line, and every fix had to be made twice.
   #
-  # The agent gets a read-only VIEW, not a connection. That distinction is the
-  # whole point: a socket connection, even one the access list marks read-only,
-  # is an authorisation surface rather than a boundary. `server-access -a -r
-  # <user>` is a real check -- tmux applies the access list to every accepted
-  # connection and a read-only client is refused any command not marked
-  # read-only, which covers `run-shell`, `kill-session` and `set-option` -- but
-  # `send-keys` IS marked read-only, so a connect-capable account could still
-  # type into the operator's shell. The access list exists because tmux.1 warns
-  # against granting access even read-only to untrusted users, and it is
-  # unreachable here anyway: the socket is owner-only, so `hermes` cannot
-  # connect at all. It is kept as defence in depth, not relied on as the
-  # boundary.
+  # The socket and transcript names are the reader's contract and do not change:
+  # admin.sock and admin.log, in /run/tmux-share. The session name does not
+  # change either. Three things an operator should know before the rebuild:
   #
-  # So the socket keeps tmux's owner-only mode for a dedicated socket
-  # (0600 root:root here; the default socket is 0660, protected by a 0700
-  # parent directory) and
-  # the `tmux-share` group carries no socket access at all. The server taps
-  # every pane of the `tmux-hermes` session into admin.log (0640 root:tmux-share) and
-  # the agent reads that file. Consequence: sending keys, executing commands or
-  # controlling the session is not merely forbidden, it is impossible without
-  # root.
+  #   * The attach command is now `tmux-share`. `tmux-hermes` is gone; it was a
+  #     local wrapper and the module installs the command instead.
+  #   * Two unit names change. The module names units <prefix>-server, -tap and
+  #     -trim, so `tmux-admin.service` becomes `tmux-admin-server.service` and
+  #     `tmux-admin-logtrim` becomes `tmux-admin-trim`. `tmux-admin-tap` keeps its
+  #     name. Nothing else in this repository references the old names.
+  #   * The session is stopped and started once, on the rebuild that adds this.
+  #     Run it while you are not using the session; scrollback is lost.
   #
-  # Accepted exposure, stated plainly: the transcript is a live copy of
-  # everything displayed in the tapped panes *from the moment the tap attaches*,
-  # so privileged or operator-surface output run there becomes readable by the
-  # agent. That is the point of the feature, but it means this pane is not the
-  # place for work whose output must stay out of the agent's reach. Coverage
-  # caveats, so this is not read as a complete record: output a pane produces
-  # before the tap reaches it is lost (startup, up to one watchdog interval for
-  # a pane opened later, and the moment a trim has the taps closed), and
-  # sessions other than `tmux-hermes` are never tapped. The transcript also outlives
-  # the pane: it stays readable until the trimmer reduces it or the host
-  # reboots.
+  # What the module keeps, per its own documentation (docs/security-model.md and
+  # docs/operations.md in the tmux-share repository): the socket is owner-only, so
+  # the reader group can read the transcript and never connect; server, tap and
+  # trimmer are separate units, so a failed tap cannot take the session down; the
+  # tap follows every pane rather than only the one that existed at startup; and
+  # the trimmer bounds the transcript.
+  services.tmux-share = {
+    enable = true;
+
+    # Root, as before: the wrapper this replaced was root-only and the socket it
+    # guarded is root's.
+    user = "root";
+    sessionName = "tmux-hermes";
+    readerGroup = "tmux-share";
+    readerUser = "hermes";
+
+    directory = "/run/tmux-share";
+    socketName = "admin.sock";
+    transcriptName = "admin.log";
+    unitPrefix = "tmux-admin";
+
+    # The shell the operator lands in, and the environment its panes get: this
+    # server is not started from a login shell, so it inherits none of that.
+    terminal = "tmux-256color";
+    historyLimit = 50000;
+    sessionPath = [ "/run/current-system/sw/bin" "/run/current-system/sw/sbin" ];
+
+    # Defence in depth and nothing more: unreachable while the socket is
+    # owner-only, and it does not stop send-keys from an account that can already
+    # connect. Kept because it costs nothing and states the intended posture if
+    # the socket's mode is ever widened.
+    serverAccessReadOnly = "hermes";
+
+    # Retention. The module trims when the file exceeds maxBytes and keeps the
+    # newest maxBytes. The host this replaces trimmed above 4 MiB and kept 2 MiB,
+    # so the reader's view swung between 2 and 4 MiB, and that band cannot be
+    # reproduced. 4 MiB keeps the peak unchanged and raises the floor: the reader
+    # can always see up to 4 MiB of history where before it could see as little as
+    # 2 MiB. It also stops falling back to 2 MiB, so it sits near the bound instead
+    # of cycling -- the trimmer fires on any tick that has output rather than only
+    # after 2 MiB of it.
+    #
+    # Two consequences of that choice, stated because they are about exposure and
+    # not about size. A line stays readable until about 4 MiB of later output has
+    # arrived, where before a trim could drop it after 2 MiB, so anything printed in
+    # a pane remains in the transcript for longer. And every trim closes the taps
+    # and reopens them, so the capture gap described in security-model.md -- output
+    # written while a tap is closed is not recorded -- now recurs on any tick that
+    # has output instead of rarely, and each gap can swallow twice as much output,
+    # because the window grows with the bound.
+    maxBytes = 4194304;
+
+    # The shell the operator lands in, by the path this host already used rather
+    # than the module's default store path. Same binary, but a stable name.
+    shell = "/run/current-system/sw/bin/fish";
+  };
+
+  # Three things this host needs that the module leaves to the deployment,
+  # because they are choices rather than invariants. Each restores behaviour the
+  # inline copy had, so the switch does not change what an operator experiences.
   #
-  # The session's shells get this server's settings, not a login shell's:
-  # fish as default-shell, the PATH above and TERM=tmux-256color. That is
-  # deliberate (a fish shell for the operator session was requested), scoped to
-  # this session;
-  # no global shell or environment is changed.
-  users.groups.tmux-share = { };
-  # `hermes` is in `extraGroups` above. A process that is already running keeps
-  # its old group set, so the agent reads the transcript as `sg tmux-share -c …`
-  # until its session is restarted; nothing else is needed.
-
-  environment.etc."tmux-share.conf".text = ''
-    # Config for the dedicated admin server only (never sourced by a normal
-    # tmux server: the unit passes it with -f).
-    # exit-empty stays ON, overriding the value -D implies: when the last pane
-    # exits the server exits, systemd restarts it, and the tap is re-attached.
-    # Keeping the server alive with no session would leave a dead session name
-    # and a dead tap that nothing recreates.
-    set -g exit-empty on
-    set -g default-shell /run/current-system/sw/bin/fish
-    set -g default-terminal "tmux-256color"
-    set -g history-limit 50000
-    set-environment -g PATH /run/current-system/sw/bin:/run/current-system/sw/sbin
-    new-session -d -s tmux-hermes -c /root
-    # Defence in depth, NOT the boundary: if the socket mode is ever widened,
-    # clients matching this user are read-only. It cannot stop send-keys or
-    # run-shell from a connect-capable account.
-    server-access -a -r hermes
-  '';
-
-  systemd.services."tmux-admin" = {
-    description = "Dedicated tmux admin server (output tapped for read-only monitoring)";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "local-fs.target" ];
-    # The unit embeds the store path of the server config, so editing that
-    # config changes this unit and restarts the server; socket, session and tap
-    # come back with it. Restarting kills the session's processes and its
-    # scrollback with systemd's control-group kill, so an activation while the
-    # operator is mid-task is not free. Restart=always covers a crash, and no
-    # start limit applies: rate-limiting a supervisor turns a transient failure
-    # into a session that stays down until someone intervenes.
-    restartIfChanged = true;
-    unitConfig.StartLimitIntervalSec = 0;
-    serviceConfig = {
-      Type = "simple";
-      Restart = "always";
-      RestartSec = 2;
-      # No UMask here on purpose: the server process is the parent of the
-      # operator's shells, so its umask would silently become their umask. The
-      # socket's own mode is tmux's business (0700, owner-only), not this unit's.
-      # The bind below needs the directory to exist; tmpfiles creates it at boot
-      # and on activation, but the unit must also start by hand without one.
-      ExecStartPre = "${pkgs.writeShellScript "tmux-admin-dir" ''
-        ${pkgs.coreutils}/bin/install -d -m 0710 -o root -g tmux-share /run/tmux-share
-      ''}";
-      # Runs while the server is up: create the transcript with group-read
-      # permissions and start the output tap. Prefixed with "-" so a failed tap
-      # degrades monitoring instead of tearing down the operator's live session;
-      # the failure is still visible in the journal.
-      ExecStartPost = "-${pkgs.writeShellScript "tmux-admin-tap" ''
-        set -eu
-        SOCK=/run/tmux-share/admin.sock
-        LOG=/run/tmux-share/admin.log
-        TMUX=${pkgs.tmux}/bin/tmux
-        if [ ! -e "$LOG" ]; then
-          ${pkgs.coreutils}/bin/install -m 0640 -o root -g tmux-share /dev/null "$LOG"
-        fi
-        # Serialise with the watchdog and the trimmer. The lock file is 0600 and
-        # outside the group-readable directory, because an exclusive flock needs
-        # no write permission: a group-readable lock would let the agent open it
-        # read-only and hold it, stalling taps and trims. The wait is bounded for
-        # the same reason.
-        ( umask 077; : > /run/tmux-share.lock )
-        ${pkgs.coreutils}/bin/chmod 0600 /run/tmux-share.lock
-        exec 9>/run/tmux-share.lock
-        ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
-          { echo "tmux-admin: the tap lock is busy; the watchdog will retry" >&2; exit 1; }
-        i=0
-        while [ "$i" -lt 100 ]; do
-          if ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" has-session -t tmux-hermes 2>/dev/null; then
-            # No -o here: a fresh server has no pipe on this pane, and -o is a
-            # toggle on an existing pipe rather than a no-op (measured on 3.7b:
-            # a second -o closed the pipe and output stopped).
-            ${pkgs.coreutils}/bin/timeout 5 "$TMUX" -S "$SOCK" pipe-pane -t tmux-hermes "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG"
-            exit 0
-          fi
-          i=$((i + 1))
-          ${pkgs.coreutils}/bin/sleep 0.1
-        done
-        echo "tmux-admin: the tmux-hermes session did not appear" >&2
-        exit 1
-      ''}";
-    };
-    script = ''
-      exec ${pkgs.tmux}/bin/tmux -D -S /run/tmux-share/admin.sock \
-        -f ${config.environment.etc."tmux-share.conf".source}
-    '';
-  };
-
-  # The watch on the tap. ExecStartPost taps the pane that exists at startup,
-  # but a pipe ends with its pane: closing that pane leaves the transcript frozen
-  # while the unit still reports healthy, and a pane opened later is untapped
-  # until this runs. This checks each pane's real state (`#{pane_pipe}`) and
-  # attaches only where nothing is attached, so coverage follows the panes
-  # without disturbing a healthy tap. Panes share one transcript, so their output
-  # interleaves.
-  systemd.services."tmux-admin-tap" = {
-    description = "Keep the transcript tap attached to every pane of the tmux-hermes session";
-    # Ordering shapes the boot transaction and queued jobs during a switch; a tick
-    # that still lands early is a skipped pass in the script below.
-    after = [ "tmux-admin.service" ];
-    serviceConfig = {
-      Type = "oneshot";
-      UMask = "0077";
-    };
-    script = ''
-      SOCK=''${TMUX_ADMIN_SOCK:-/run/tmux-share/admin.sock}
-      LOG=''${TMUX_ADMIN_LOG:-/run/tmux-share/admin.log}
-      LOCK=''${TMUX_ADMIN_LOCK:-/run/tmux-share.lock}
-      REBUILD=''${TMUX_ADMIN_REBUILD:-/run/tmux-share.rebuild}
-      TMUX=''${TMUX_ADMIN_TMUX:-${pkgs.tmux}/bin/tmux}
-      TO=''${TMUX_ADMIN_TIMEOUT:-${pkgs.coreutils}/bin/timeout}
-      # How long has the server been unusable? A not-ready server is excused for
-      # NOTREADY_GRACE seconds counted from the first pass that saw it not ready
-      # (not from the unit's start time),
-      # so an activation race or a short restart is quiet while a server that stays
-      # down is reported once the grace expires. A flapping server is NOT reported
-      # if a tick lands in one of its up-windows: a successful pass clears the
-      # marker. That is the price of not failing healthy restarts. The stamp is a plain file
-      # beside the transcript in the root-owned directory; no systemd query is
-      # involved, so there is no second clock to disagree with.
-      NOTREADY=''${LOG%/*}/.notready-since
-      NOTREADY_GRACE=300
-      excused_while_not_ready() {
-        # /proc/uptime, not wall time: a clock step cannot move it, and it cannot
-        # read higher than a later reading within a boot, and the `since > now`
-        # test below is the guard for anything that did. /run is tmpfs, so a
-        # reboot clears the marker along with the transcript it belongs to.
-        now=$(${pkgs.coreutils}/bin/cut -d. -f1 /proc/uptime) || now=""
-        case "$now" in
-          "" | *[!0-9]*) echo "$1: cannot read /proc/uptime; not excusing" >&2; return 1 ;;
-        esac
-        since=""
-        [ -f "$NOTREADY" ] && since=$(cat "$NOTREADY" 2>/dev/null)
-        need_stamp=0
-        case "$since" in
-          "" | *[!0-9]*) need_stamp=1 ;;
-          *)
-            # Longer than 10 digits would overflow the shell's signed arithmetic
-            # and could read as negative, which no comparison here would catch.
-            if [ ''${#since} -gt 10 ]; then
-              need_stamp=1
-            else
-              since=$(( 10#$since ))
-              # A marker written by the previous revision holds wall-clock seconds
-              # (about 1.7e9) against an uptime of about 3.5e5, so it lands here
-              # and is re-stamped once rather than trusted.
-              if [ "$since" -gt "$now" ]; then need_stamp=1; fi
-            fi
-            ;;
-        esac
-        if [ "$need_stamp" -eq 1 ]; then
-          since=$now
-          # Written to a per-writer temporary file and renamed: a reader that
-          # takes no lock (the socket-missing branch) must never see a truncated
-          # marker, which would look like "no marker yet" and grant a fresh grace.
-          # mktemp, not a fixed name, because the watchdog's unlocked branch and
-          # the trimmer can write at the same time; a shared temp name would let
-          # one writer's rename make the other's fail and fail that unit.
-          stamp_tmp=$(${pkgs.coreutils}/bin/mktemp "$NOTREADY.XXXXXX") || stamp_tmp=""
-          if [ -z "$stamp_tmp" ] ||
-             ! printf '%s\n' "$now" > "$stamp_tmp" ||
-             ! ${pkgs.coreutils}/bin/mv -f "$stamp_tmp" "$NOTREADY"; then
-            if [ -n "$stamp_tmp" ]; then ${pkgs.coreutils}/bin/rm -f "$stamp_tmp"; fi
-            # Without a marker the grace would restart on every pass and the
-            # outage would never be reported, so a failed write fails the pass.
-            echo "$1: cannot record the not-ready time in $NOTREADY" >&2
-            return 1
-          fi
-        fi
-        if [ $(( now - since )) -ge "$NOTREADY_GRACE" ]; then return 1; fi
-        echo "$1: server not ready; excused for another $(( NOTREADY_GRACE - (now - since) ))s" >&2
-        return 0
-      }
-      server_ready() { rm -f "$NOTREADY"; }
-      if [ ! -S "$SOCK" ]; then
-        excused_while_not_ready tmux-admin-tap && exit 0
-        echo "tmux-admin-tap: no socket at $SOCK and the server has not recovered" >&2
-        exit 1
-      fi
-      recreated=0
-      if [ ! -e "$LOG" ]; then
-        # Recreate it, and note that recreating alone changes nothing: the panes'
-        # writer still holds the unlinked inode, and no attach command
-        # can move them, so the taps below are retired explicitly. The marker is
-        # written here, before the lock, because this pass can still exit early
-        # (busy lock, tmux not answering) and a later pass that sees only a
-        # present file would otherwise never retry.
-        ${pkgs.coreutils}/bin/install -m 0640 -o root -g tmux-share /dev/null "$LOG"
-        : > "$REBUILD"
-      fi
-      if [ -e "$REBUILD" ]; then
-        recreated=1
-      fi
-      # Bounded wait, 0600 lock: see the note on the startup tap.
-      ( umask 077; : > "$LOCK" )
-      ${pkgs.coreutils}/bin/chmod 0600 "$LOCK"
-      exec 9>"$LOCK"
-      ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
-        { echo "tmux-admin-tap: the tap lock is busy; skipping this pass" >&2; exit 1; }
-      # Every tmux call is bounded: a server that accepts connections but stops
-      # answering would otherwise block while this holds the shared lock.
-      # #{pane_pipe} is fetched in the same call so the decision to attach is
-      # based on real state: `pipe-pane -o` is a toggle, not "attach if absent".
-      # stderr goes to a file rather than into `$panes`: merging it would feed
-      # tmux's error text to the pane loop as if it were pane IDs. The file lives
-      # beside the transcript, in a root-owned directory the group can traverse
-      # but not write, so no unprivileged account can pre-place a symlink there.
-      ERR=$(${pkgs.coreutils}/bin/mktemp "''${LOG%/*}/.tap-err.XXXXXX") || exit 1
-      rc=0
-      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t tmux-hermes -F '#{pane_id} #{pane_pipe}' 2>"$ERR") || rc=$?
-      why=""
-      if [ -s "$ERR" ]; then why=$(${pkgs.coreutils}/bin/cat "$ERR"); fi
-      ${pkgs.coreutils}/bin/rm -f "$ERR"
-      if [ "$rc" -ne 0 ]; then
-        # Exit 1 with one of tmux's "nothing to talk to" messages, while the
-        # server may still be starting, is a skipped pass rather than a failure.
-        # Anything else stays an error: 127 means the bounded command itself could
-        # not run, and a server that is missing long after the unit came up means
-        # the session is gone.
-        excused=1
-        if [ "$rc" -eq 1 ]; then
-          case "$why" in
-            *"no server running on"*|*"can't find session"*|*"can't find window"*|*"No such file or directory"*|*"Connection refused"*|*"server exited unexpectedly"*)
-              excused_while_not_ready tmux-admin-tap && excused=0 ;;
-          esac
-        fi
-        if [ "$excused" -eq 0 ]; then
-          exit 0
-        fi
-        echo "tmux-admin-tap: cannot list panes (exit $rc): $why" >&2
-        exit 1
-      fi
-      server_ready
-      rebuilt=1
-      while read -r pane has; do
-        [ -n "$pane" ] || continue
-        if [ "$recreated" -eq 1 ]; then
-          # Recreating the file leaves the old pipe writing to the unlinked
-          # inode, so retire it first and treat the pane as untapped.
-          if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane"; then
-            echo "tmux-admin-tap: could not retire the stale tap on $pane; will retry" >&2
-            rebuilt=0
-            continue
-          fi
-          has=0
-        fi
-        if [ "$has" = 1 ]; then
-          continue
-        fi
-        # Report failures: a tap that silently refuses to attach looks exactly
-        # like an idle pane in the transcript.
-        if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane" \
-          "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG"; then
-          echo "tmux-admin-tap: could not attach the tap to $pane" >&2
-          rebuilt=0
-        fi
-      done <<< "$panes"
-      if [ "$recreated" -eq 1 ]; then
-        if [ "$rebuilt" -eq 1 ]; then
-          ${pkgs.coreutils}/bin/rm -f "$REBUILD"
-          echo "tmux-admin-tap: rebuilt the taps for every pane" >&2
-        else
-          : > "$REBUILD"
-          echo "tmux-admin-tap: some taps still need rebuilding; next pass retries" >&2
-        fi
-      fi
-    '';
-  };
-
-  systemd.timers."tmux-admin-tap" = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "20s";
-      OnUnitActiveSec = "20s";
-      # One second, not systemd's one-minute default. The gap between ticks is
-      # what output can be missed when a pane is replaced, so the window is the
-      # interval plus the accuracy: "every 20 seconds" is really anywhere up to
-      # about 80 at the default, and about 21 here.
-      AccuracySec = "1s";
-      Unit = "tmux-admin-tap.service";
-    };
-  };
-
-  # The transcript lives in /run (tmpfs): it is not intentionally written to disk
-  # and is wiped at boot, but tmpfs pages are swappable and the server also keeps
-  # its own scrollback in memory, so treat this as bounded retention rather than
-  # as storage that never holds sensitive output. A long build or a log tail can
-  # otherwise eat RAM, so this trims down to the newest 2 MiB once a five-minute
-  # tick sees the file above 4 MiB. The bound is therefore "2-4 MiB plus up to
-  # one tick interval of output", not a hard 2 MiB ceiling, and it holds only
-  # while trims succeed: a server that keeps failing to list or close panes skips
-  # the trim, so the file can grow until tmux recovers. The trim closes the taps,
-  # writes the tail to a new file and renames it into place, so a writer that is
-  # still flushing cannot tear the new transcript; output produced between the
-  # close and the reopen is not recorded. The cut is byte-based, so the first
-  # retained line can begin mid-line or mid-escape sequence.
-  systemd.services."tmux-admin-logtrim" = {
-    description = "Cap the monitored tmux transcript, keeping the newest output";
-    serviceConfig = {
-      Type = "oneshot";
-      UMask = "0077";
-    };
-    script = ''
-      set -eu
-      LOG=''${TMUX_ADMIN_LOG:-/run/tmux-share/admin.log}
-      NEW=$LOG.new
-      SOCK=''${TMUX_ADMIN_SOCK:-/run/tmux-share/admin.sock}
-      LOCK=''${TMUX_ADMIN_LOCK:-/run/tmux-share.lock}
-      TMUX=''${TMUX_ADMIN_TMUX:-${pkgs.tmux}/bin/tmux}
-      TO=''${TMUX_ADMIN_TIMEOUT:-${pkgs.coreutils}/bin/timeout}
-      [ -f "$LOG" ] || exit 0
-      size=$(${pkgs.coreutils}/bin/stat -c %s "$LOG")
-      [ "$size" -gt 4194304 ] || exit 0
-      # How long has the server been unusable? A not-ready server is excused for
-      # NOTREADY_GRACE seconds counted from the first pass that saw it not ready
-      # (not from the unit's start time),
-      # so an activation race or a short restart is quiet while a server that stays
-      # down is reported once the grace expires. A flapping server is NOT reported
-      # if a tick lands in one of its up-windows: a successful pass clears the
-      # marker. That is the price of not failing healthy restarts. The stamp is a plain file
-      # beside the transcript in the root-owned directory; no systemd query is
-      # involved, so there is no second clock to disagree with.
-      NOTREADY=''${LOG%/*}/.notready-since
-      NOTREADY_GRACE=300
-      excused_while_not_ready() {
-        # /proc/uptime, not wall time: a clock step cannot move it, and it cannot
-        # read higher than a later reading within a boot, and the `since > now`
-        # test below is the guard for anything that did. /run is tmpfs, so a
-        # reboot clears the marker along with the transcript it belongs to.
-        now=$(${pkgs.coreutils}/bin/cut -d. -f1 /proc/uptime) || now=""
-        case "$now" in
-          "" | *[!0-9]*) echo "$1: cannot read /proc/uptime; not excusing" >&2; return 1 ;;
-        esac
-        since=""
-        [ -f "$NOTREADY" ] && since=$(cat "$NOTREADY" 2>/dev/null)
-        need_stamp=0
-        case "$since" in
-          "" | *[!0-9]*) need_stamp=1 ;;
-          *)
-            # Longer than 10 digits would overflow the shell's signed arithmetic
-            # and could read as negative, which no comparison here would catch.
-            if [ ''${#since} -gt 10 ]; then
-              need_stamp=1
-            else
-              since=$(( 10#$since ))
-              # A marker written by the previous revision holds wall-clock seconds
-              # (about 1.7e9) against an uptime of about 3.5e5, so it lands here
-              # and is re-stamped once rather than trusted.
-              if [ "$since" -gt "$now" ]; then need_stamp=1; fi
-            fi
-            ;;
-        esac
-        if [ "$need_stamp" -eq 1 ]; then
-          since=$now
-          # Written to a per-writer temporary file and renamed: a reader that
-          # takes no lock (the socket-missing branch) must never see a truncated
-          # marker, which would look like "no marker yet" and grant a fresh grace.
-          # mktemp, not a fixed name, because the watchdog's unlocked branch and
-          # the trimmer can write at the same time; a shared temp name would let
-          # one writer's rename make the other's fail and fail that unit.
-          stamp_tmp=$(${pkgs.coreutils}/bin/mktemp "$NOTREADY.XXXXXX") || stamp_tmp=""
-          if [ -z "$stamp_tmp" ] ||
-             ! printf '%s\n' "$now" > "$stamp_tmp" ||
-             ! ${pkgs.coreutils}/bin/mv -f "$stamp_tmp" "$NOTREADY"; then
-            if [ -n "$stamp_tmp" ]; then ${pkgs.coreutils}/bin/rm -f "$stamp_tmp"; fi
-            # Without a marker the grace would restart on every pass and the
-            # outage would never be reported, so a failed write fails the pass.
-            echo "$1: cannot record the not-ready time in $NOTREADY" >&2
-            return 1
-          fi
-        fi
-        if [ $(( now - since )) -ge "$NOTREADY_GRACE" ]; then return 1; fi
-        echo "$1: server not ready; excused for another $(( NOTREADY_GRACE - (now - since) ))s" >&2
-        return 0
-      }
-      server_ready() { rm -f "$NOTREADY"; }
-      # Close every tap, write the tail to a new file, then rename it into place.
-      # Rename is atomic, so a straggler that was mid-flush ends up on the
-      # unlinked inode (losing at most its last bytes) instead of tearing the new
-      # file. The close is checked rather than best-effort: a pipe that survived
-      # the trim would keep writing to the unlinked inode, and the watchdog
-      # (which only attaches where `#{pane_pipe}` is 0) would not notice, so the
-      # transcript would freeze until the server restarted. The lock stops the
-      # watchdog re-tapping mid-trim.
-      ( umask 077; : > "$LOCK" )
-      ${pkgs.coreutils}/bin/chmod 0600 "$LOCK"
-      exec 9>"$LOCK"
-      ${pkgs.util-linux}/bin/flock -w 20 -x 9 ||
-        { echo "tmux-admin-logtrim: the tap lock is busy; skipping this trim" >&2; exit 1; }
-      ERR=$(${pkgs.coreutils}/bin/mktemp "''${LOG%/*}/.trim-err.XXXXXX") || exit 1
-      rc=0
-      panes=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t tmux-hermes -F '#{pane_id}' 2>"$ERR") || rc=$?
-      why=""
-      if [ -s "$ERR" ]; then why=$(${pkgs.coreutils}/bin/cat "$ERR"); fi
-      ${pkgs.coreutils}/bin/rm -f "$ERR"
-      if [ "$rc" -ne 0 ]; then
-        # Same rule as the watchdog: nothing to trim while the server is not up
-        # yet, but a server that vanished is a fault worth reporting.
-        excused=1
-        if [ "$rc" -eq 1 ]; then
-          case "$why" in
-            *"no server running on"*|*"can't find session"*|*"can't find window"*|*"No such file or directory"*|*"Connection refused"*|*"server exited unexpectedly"*)
-              excused_while_not_ready tmux-admin-logtrim && excused=0 ;;
-          esac
-        fi
-        if [ "$excused" -eq 0 ]; then
-          exit 0
-        fi
-        echo "tmux-admin-logtrim: cannot enumerate panes (exit $rc): $why" >&2
-        exit 1
-      fi
-      server_ready
-      closed=1
-      for pane in $panes; do
-        if ! "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane"; then
-          echo "tmux-admin-logtrim: could not stop the tap on $pane; not trimming" >&2
-          closed=0
-        fi
-      done
-      # From here on every exit path must put the taps back, including a failing
-      # chmod/chgrp/mv under set -e. Output produced between close and reopen is
-      # not recorded; that gap is the price of rewriting under a live writer.
-      reopen() {
-        rc=$?
-        # Re-read the real state rather than trusting the pre-close list: a
-        # `pipe-pane -o` on a live pipe closes it instead of being a no-op.
-        now=$("$TO" 5 "$TMUX" -S "$SOCK" list-panes -s -t tmux-hermes \
-          -F '#{pane_id} #{pane_pipe}' 2>/dev/null || true)
-        while read -r pane has; do
-          [ -n "$pane" ] || continue
-          [ "$has" = 1 ] && continue
-          "$TO" 5 "$TMUX" -S "$SOCK" pipe-pane -t "$pane" \
-            "exec ${tmuxTapStamp}/bin/tmux-tap-stamp >> $LOG" ||
-            echo "tmux-admin-logtrim: could not reopen the tap on $pane" >&2
-        done <<< "$now"
-        exit "$rc"
-      }
-      trap reopen EXIT
-      if [ "$closed" -ne 1 ]; then
-        exit 1
-      fi
-      if ! ${pkgs.coreutils}/bin/tail -c 2097152 "$LOG" > "$NEW"; then
-        echo "tmux-admin-logtrim: could not read the transcript; leaving it alone" >&2
-        ${pkgs.coreutils}/bin/rm -f "$NEW"
-        exit 1
-      fi
-      if ! ${pkgs.coreutils}/bin/chmod 0640 "$NEW" ||
-         ! ${pkgs.coreutils}/bin/chgrp tmux-share "$NEW"; then
-        echo "tmux-admin-logtrim: could not set the transcript's mode; leaving it alone" >&2
-        ${pkgs.coreutils}/bin/rm -f "$NEW"
-        exit 1
-      fi
-      if ! ${pkgs.coreutils}/bin/mv -f "$NEW" "$LOG"; then
-        echo "tmux-admin-logtrim: could not replace the transcript" >&2
-        ${pkgs.coreutils}/bin/rm -f "$NEW"
-        exit 1
-      fi
-      exit 0
-    '';
-  };
-
-  systemd.timers."tmux-admin-logtrim" = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "5min";
-      OnUnitActiveSec = "5min";
-      # Same one-minute-default trap as the tap.
-      AccuracySec = "1s";
-      Unit = "tmux-admin-logtrim.service";
-    };
-  };
+  # 1. exit-empty is on: when the operator leaves the last pane the server exits,
+  #    and a server that does not come back leaves a dead session name and a tap
+  #    with nothing to attach to. Restart=always is what makes the session come
+  #    back; the module's own restart policy is for a crash, not for a clean exit.
+  systemd.services.tmux-admin-server.serviceConfig.Restart = lib.mkForce "always";
+  # 2. No start limit: rate-limiting a supervisor turns a transient failure into a
+  #    session that stays down until someone intervenes.
+  systemd.services.tmux-admin-server.unitConfig.StartLimitIntervalSec = 0;
+  # 3. Editing the generated tmux configuration replaces its store path, and a
+  #    server still running the old one would ignore the change. Restarting on
+  #    that trigger costs the session and its scrollback, which is the same price
+  #    the inline copy charged for the same edit.
+  systemd.services.tmux-admin-server.restartTriggers = [
+    config.environment.etc."tmux-share/tmux.conf".source
+  ];
 
   system.stateVersion = "25.11";
 }

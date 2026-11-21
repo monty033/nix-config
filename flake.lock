@@ -335,7 +335,8 @@
         "nookbridge": "nookbridge",
         "philly-masters": "philly-masters",
         "plasma-manager": "plasma-manager",
-        "sops-nix": "sops-nix"
+        "sops-nix": "sops-nix",
+        "tmux-share": "tmux-share"
       }
     },
     "sops-nix": {
@@ -356,6 +357,27 @@
         "owner": "Mic92",
         "repo": "sops-nix",
         "type": "github"
+      }
+    },
+    "tmux-share": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1795269705,
+        "narHash": "sha256-nPZwMUI6/qghHt5pO/cp3cxPBuybgHfog6gooNJvBAg=",
+        "ref": "refs/heads/master",
+        "rev": "35a77a587eadd169eb75a4774a0e1411396e90dd",
+        "revCount": 69,
+        "type": "git",
+        "url": "https://git.montycasa.net/patrick/tmux-share"
+      },
+      "original": {
+        "rev": "35a77a587eadd169eb75a4774a0e1411396e90dd",
+        "type": "git",
+        "url": "https://git.montycasa.net/patrick/tmux-share"
       }
     },
     "uv2nix": {

@@ -23,6 +23,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # The monitored tmux session is maintained in its own repository and this
+    # host configures it instead of reimplementing it, so a fix lands once and
+    # both the published module and this host get it. Pinned by rev; bump it the
+    # same way as any other input.
+    tmux-share = {
+      url = "git+https://git.montycasa.net/patrick/tmux-share?rev=35a77a587eadd169eb75a4774a0e1411396e90dd";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     nix-flatpak = {
       url = "github:gmodena/nix-flatpak";
     };
