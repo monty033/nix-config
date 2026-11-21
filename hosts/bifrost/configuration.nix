@@ -113,6 +113,49 @@
         upstream = "http://nextcloud:80";
       };
 
+      # The Logseq sync server. Public because the device that needs it is a
+      # managed laptop that cannot install the tailnet client. Caddy adds no
+      # authentication here: the service verifies the client's Logseq token
+      # against Logseq's identity provider, and membership guards existing graphs.
+      #
+      # What membership does not guard is this host's disk. Upstream checks tokens
+      # against Logseq's public sign-up pool, so any account counts as
+      # authenticated, and any authenticated account may create a graph (only graph
+      # deletion requires the admin token). A stranger could then fill this LXC
+      # with their own graph. Creation is refused here instead, which means the
+      # graph has to be created first by a tailnet device addressing
+      # http://logseq:8787 directly; the public name always passes through this
+      # proxy, even on the tailnet. The API description, the /api surface
+      # (semantic API and access tokens) and the admin routes are not part of a
+      # client's sync flow either.
+      "logseq.montycasa.com" = {
+        protocol = "http";
+        upstream = "http://logseq:8787";
+        extraRoutes = ''
+          @createGraph {
+            method POST
+            path /graphs
+          }
+          respond @createGraph 403
+          respond /openapi.json 404
+          respond /api/* 404
+          respond /admin/* 404
+
+          # Key-exchange bodies are a few KB. POST /e2ee/user-keys is the one
+          # write any account can make (one row per account); this cap bounds it,
+          # and the service reads a JSON body whole into a container capped at
+          # 512 MiB. Sync batches keep the generous limit below; Caddy applies
+          # the smaller limit where both match.
+          @smallJson path /e2ee /e2ee/*
+          request_body @smallJson {
+            max_size 64KB
+          }
+          request_body {
+            max_size 1GB
+          }
+        '';
+      };
+
       "office.montycasa.com" = {
         protocol = "http";
         upstream = "http://nextcloud:8100";
