@@ -165,7 +165,9 @@
             echo "no schema in $1" >&2
             exit 1
           fi
-          echo "ok: $1"
+          # Name the file as it will be once the dump is renamed into place, not the
+          # partial path it lives at while being checked.
+          echo "ok: ''${1#"$tmp/"}"
         }
 
         # Graph directories, by name, so a graph is dumped or the run fails: the
@@ -224,6 +226,92 @@
       # This host is on America/New_York, so 00:30 here precedes the 01:00 snapshot.
       OnCalendar = "*-*-* 00:30:00";
       # Catch up after a missed window rather than silently skipping a night.
+      Persistent = true;
+    };
+  };
+
+  # The dump proves itself only on the nights it runs. A night where the unit never
+  # started at all looks exactly like a quiet one, so this checks the result: the
+  # newest dump must exist, be from last night, and still open.
+  # Anything else is a failed unit, which is what makes silence distinguishable
+  # from success without reading a log.
+  systemd.services.logseq-sync-backup-check = {
+    description = "Check that the newest dump of the sync data is recent and intact";
+    path = [ pkgs.coreutils pkgs.findutils ];
+    # Both timers catch up after a boot, so without this the check could start before
+    # the dump and report the previous dump as stale. After= orders them when both are
+    # queued and never starts a dump on its own.
+    after = [ "logseq-sync-backup.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      # As for the dump: a hung check stays "activating" and every later firing is a
+      # no-op, which would switch the check off silently.
+      TimeoutStartSec = "10min";
+      ExecStart = pkgs.writeShellScript "logseq-sync-backup-check" ''
+        set -euo pipefail
+
+        root=/var/lib/logseq-sync/backups
+        # The dump runs at 00:30 local and this at 06:00: last night's dump is 4.5-6.5h
+        # old here, the one before it at least 28.5h. A check run late by Persistent
+        # sees at most 25h, so 27h fails a single missed night and nothing healthy.
+        max_age_h=27
+
+        newest=$(find "$root" -mindepth 1 -maxdepth 1 -type d \
+                   -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' \
+                   -printf '%f\n' | sort -r | head -1)
+        if [ -z "$newest" ]; then
+          echo "no dump in $root" >&2
+          exit 1
+        fi
+
+        # Age comes from the name, not the mtime: opening an old dump moves its mtime.
+        iso=$(printf '%s' "$newest" | sed -E \
+          's/^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z$/\1-\2-\3 \4:\5:\6Z/')
+        age_s=$(( $(date +%s) - $(date -d "$iso" +%s) ))
+        age=$(( age_s / 3600 ))
+        # A stamp from the future means the clock moved. It also sorts above every real
+        # dump, so retention never prunes it and it would read as fresh indefinitely.
+        if [ "$age_s" -lt -300 ]; then
+          echo "newest dump is stamped in the future: $newest" >&2
+          exit 1
+        fi
+        if [ "$age_s" -gt $(( max_age_h * 3600 )) ]; then
+          echo "newest dump is ''${age}h old: $newest" >&2
+          exit 1
+        fi
+
+        # The glob guard below is for an empty graphs/ directory; without this the
+        # index would be skipped too and an empty dump would pass.
+        if [ ! -s "$root/$newest/index.sqlite" ]; then
+          echo "no index in $root/$newest" >&2
+          exit 1
+        fi
+
+        for db in "$root/$newest/index.sqlite" "$root/$newest"/graphs/*.sqlite; do
+          [ -e "$db" ] || continue
+          # Capture sqlite's own complaint too: on a corrupted file it refuses before
+          # printing a result, and that message does not name the file.
+          if ! result=$(${pkgs.sqlite}/bin/sqlite3 -bail "file:$db?mode=ro" 'pragma integrity_check;' 2>&1); then
+            echo "cannot read $db: $result" >&2
+            exit 1
+          fi
+          if [ "$result" != "ok" ]; then
+            echo "integrity check failed for $db: $result" >&2
+            exit 1
+          fi
+        done
+
+        echo "ok: $newest (''${age}h old)"
+      '';
+    };
+  };
+
+  systemd.timers.logseq-sync-backup-check = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      # After the dump and the snapshot, before the day starts.
+      OnCalendar = "*-*-* 06:00:00";
+      # A missed check is worth running late: its whole job is to notice gaps.
       Persistent = true;
     };
   };
