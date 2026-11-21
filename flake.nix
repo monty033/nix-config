@@ -27,8 +27,14 @@
     # host configures it instead of reimplementing it, so a fix lands once and
     # both the published module and this host get it. Pinned by rev; bump it the
     # same way as any other input.
+    #
+    # This revision `b7dade8bbc9c9aea51459dc3636886dd22282536` is 2 commits after
+    # the previous pin `35a77a587eadd169eb75a4774a0e1411396e90dd` (revCount 69 to
+    # 71): the packaged stamp filter is built with a store-path interpreter
+    # rather than "#!/usr/bin/env python3", and a watchdog pass retires a pipe
+    # flag that no live filter is behind.
     tmux-share = {
-      url = "git+https://git.montycasa.net/patrick/tmux-share?rev=35a77a587eadd169eb75a4774a0e1411396e90dd";
+      url = "git+https://git.montycasa.net/patrick/tmux-share?rev=b7dade8bbc9c9aea51459dc3636886dd22282536";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
