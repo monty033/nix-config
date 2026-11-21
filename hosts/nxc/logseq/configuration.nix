@@ -14,7 +14,7 @@
   # 192.168.86.1, outside the .210-.254 DHCP pool.
 
   environment.systemPackages = with pkgs; [
-
+    sqlite
   ];
 
   extra-services.tailscale = {
@@ -87,7 +87,146 @@
   systemd.tmpfiles.rules = [
     "d /var/lib/logseq-sync 0750 root root -"
     "d /var/lib/logseq-sync/data 0750 65532 65532 -"
+    "d /var/lib/logseq-sync/backups 0750 root root -"
   ];
+
+  # A consistent logical copy of the sync data every night, half an hour before the
+  # Proxmox snapshot runs over this guest. Both databases run in WAL mode, so the
+  # files are copied through sqlite's own backup path rather than with cp: a plain
+  # copy of a live WAL database can be torn, while `.backup` takes a consistent
+  # snapshot of it.
+  #
+  # This is not a substitute for the Proxmox backup, which is retried, deduplicated
+  # and off-host. It is the thing that proves the data is readable: every copy is put
+  # through an integrity check here, so a corrupt source fails tonight instead of on
+  # the day someone restores it, and each dumped database is self-contained enough to
+  # open without this container.
+  #
+  # Assets are hard-linked rather than copied. They are content-addressed blobs the
+  # service only ever adds, so a link costs no space, survives the service deleting
+  # the original, and stays inside the retention window. If they are ever rewritten
+  # in place, this stops being a backup of them and has to become a copy.
+  #
+  # A directory named like a dump is only ever produced by a run that passed every
+  # check: the work happens in a dot-directory that is renamed into place at the end,
+  # so a dump left half-written can never be mistaken for a good one.
+  systemd.services.logseq-sync-backup = {
+    description = "Consistent dump of the Logseq sync data";
+    path = [ pkgs.coreutils pkgs.findutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      # The index carries key material.
+      UMask = "0077";
+      # Without this a hung run stays "activating" forever and every later timer
+      # firing is a no-op, so backups would stop silently. Fails well before 01:00.
+      TimeoutStartSec = "25min";
+      ExecStart = pkgs.writeShellScript "logseq-sync-backup" ''
+        set -euo pipefail
+
+        src=/var/lib/logseq-sync/data
+        root=/var/lib/logseq-sync/backups
+        keep=14
+        stamp=$(date -u +%Y%m%dT%H%M%SZ)
+        out="$root/$stamp"
+        tmp="$root/.partial-$stamp"
+
+        rm -rf "$root"/.partial-*
+        trap 'rm -rf "$tmp"' EXIT
+        mkdir -p "$tmp/graphs"
+
+        sql() {
+          # No busy timeout by default, so a checkpoint at the wrong moment would
+          # fail the run; ride it out instead.
+          ${pkgs.sqlite}/bin/sqlite3 -bail -cmd '.timeout 30000' "$@"
+        }
+
+        dump() {
+          # sqlite3 happily creates a database at a path that does not exist, and an
+          # empty database passes integrity_check, so a missing source is fatal here
+          # rather than a silently empty dump.
+          if [ ! -s "$1" ]; then
+            echo "source missing or empty: $1" >&2
+            exit 1
+          fi
+          sql "$1" ".backup '$2'"
+          # The copy inherits the WAL flag, which makes opening it need write access
+          # next to it. Rewriting the header makes it a standalone file.
+          sql "$2" 'pragma journal_mode=delete;' > /dev/null
+        }
+
+        check() {
+          result=$(sql "$1" 'pragma integrity_check;')
+          if [ "$result" != "ok" ]; then
+            echo "integrity check failed for $1: $result" >&2
+            exit 1
+          fi
+          tables=$(sql "$1" 'select count(*) from sqlite_master;')
+          if [ "$tables" -eq 0 ]; then
+            echo "no schema in $1" >&2
+            exit 1
+          fi
+          echo "ok: $1"
+        }
+
+        # Graph directories, by name, so a graph is dumped or the run fails: the
+        # previous glob silently skipped any directory without a database in it.
+        graphs() {
+          if [ -d "$src/graphs" ]; then
+            find "$src/graphs" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+          fi
+        }
+
+        before=$(graphs)
+        dump "$src/index.sqlite" "$tmp/index.sqlite"
+        n=0
+        for graph in $before; do
+          dump "$src/graphs/$graph/db.sqlite" "$tmp/graphs/$graph.sqlite"
+          n=$((n + 1))
+        done
+        # Index and graphs are separate files taken one after another. If the set of
+        # graphs moved in between they are not one moment, so leave it to tomorrow.
+        if [ "$(graphs)" != "$before" ]; then
+          echo "graph set changed during the dump" >&2
+          exit 1
+        fi
+
+        if [ -d "$src/assets" ]; then
+          cp -al "$src/assets" "$tmp/assets"
+        else
+          echo "no assets directory yet"
+        fi
+
+        check "$tmp/index.sqlite"
+        for db in "$tmp"/graphs/*.sqlite; do
+          [ -e "$db" ] || continue
+          check "$db"
+        done
+
+        mv -T "$tmp" "$out"
+        trap - EXIT
+        echo "dump complete: $out ($n graphs)"
+
+        # Newest first by name, which is the UTC timestamp. Only directories this
+        # script named are counted or removed, so a stray directory of one's own is
+        # neither mistaken for a dump nor deleted.
+        find "$root" -mindepth 1 -maxdepth 1 -type d \
+            -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' \
+            -printf '%f\n' \
+          | sort -r | tail -n +$((keep + 1)) \
+          | while read -r old; do rm -rf -- "$root/$old"; done
+      '';
+    };
+  };
+
+  systemd.timers.logseq-sync-backup = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      # This host is on America/New_York, so 00:30 here precedes the 01:00 snapshot.
+      OnCalendar = "*-*-* 00:30:00";
+      # Catch up after a missed window rather than silently skipping a night.
+      Persistent = true;
+    };
+  };
 
   # The LAN may reach the sync server directly; the guest and IoT VLANs may not.
   #
