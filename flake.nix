@@ -267,14 +267,18 @@
     # described whenever the record read `locked: false`; it now asks the same
     # lock rule as discovery, `notes.get` and the write seam, and refuses.
     #
-    # This revision is 7 commits after the previous pin (revCount 739 to 746)
-    # and is the merge of #314, which makes a recovery leave state the service
+    # The pin before this one `ebc3dc8ebd0fc2109848b836dbeff9338bd46688` was 7
+    # commits after its own predecessor (revCount 739 to 746) and is the merge
+    # of #314, which makes a recovery leave state the service
     # user can open and lets live login read the systemd credential key. Fresh
     # members created by a reinitialize now take the state root's owner instead
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
+    #
+    # This revision `b98eb8bb906ff6d46bad6cf6fda8a615ada8a791` is 12 commits
+    # after the previous pin (revCount 746 to 758) and is the merge of #321.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=ebc3dc8ebd0fc2109848b836dbeff9338bd46688";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=b98eb8bb906ff6d46bad6cf6fda8a615ada8a791";
       flake = false;
     };
 
