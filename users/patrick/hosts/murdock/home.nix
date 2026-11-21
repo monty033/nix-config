@@ -23,35 +23,23 @@ let
       ' opencode-hermes ${opencode-v2}/bin/opencode --server http://hermes.skink-galaxy.ts.net:4096 "$@"
   '';
   # Hermes Desktop as a remote-only client of the dashboard on the Hermes host.
-  # This overrides the pinned package instead of enabling programs.hermes-agent
-  # or services.hermes-agent, so this Nix config enables no local backend service
-  # and ships exactly one launcher and desktop entry. The remote connection is
-  # saved in Desktop's own connection config (remote mode, OAuth auth). Desktop
-  # starts a local backend only when no saved remote connection exists, so that
-  # saved connection must stay in place. Do not inject
-  # HERMES_DESKTOP_REMOTE_URL or HERMES_DESKTOP_REMOTE_TOKEN at launch: when the
-  # URL variable is set, Desktop overrides the saved connection and falls back to
-  # token mode, which the dashboard rejects with no_cookie on REST calls.
-  # The pinned v2026.9.24 desktop package has a stale fixed hash for this
-  # versioned Electron headers URL. Repackage the matching headers already
-  # pinned by nixpkgs, preserving the archive root expected by upstream.
-  electronHeadersArchive = pkgs-unstable.runCommandLocal "electron-${pkgs-unstable.electron.version}-nodedir-headers.tar.gz" { } ''
-    set -euo pipefail
-    mkdir -p node_headers
-    cp -a ${pkgs-unstable.electron.headers}/. node_headers/
-    tar --sort=name --mtime='@1' --owner=0 --group=0 --numeric-owner -cf - node_headers | ${pkgs-unstable.gzip}/bin/gzip -n > "$out"
-  '';
-  hermesDesktopBuildPkgs = pkgs-unstable // {
-    fetchurl = args:
-      if (args.url or null) == "https://artifacts.electronjs.org/headers/dist/v${pkgs-unstable.electron.version}/node-v${pkgs-unstable.electron.version}-headers.tar.gz"
-        && (args.sha256 or null) == "sha256-f8bSbLRmtbP93CJAvEBs+sHWDZ1xP2bcpLhC1EnOmZU="
-      then electronHeadersArchive
-      else pkgs-unstable.fetchurl args;
-  };
-  hermes-desktop-remote = inputs.nix-hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop.override {
-    pkgs = hermesDesktopBuildPkgs;
-    electron = pkgs-unstable.electron;
-  };
+  # This installs the pinned package directly instead of enabling
+  # programs.hermes-agent or services.hermes-agent, so this Nix config enables no
+  # local backend service and ships exactly one launcher and desktop entry. The
+  # remote connection is saved in Desktop's own connection config (remote mode,
+  # OAuth auth). Desktop starts a local backend only when no saved remote
+  # connection exists, so that saved connection must stay in place. Do not
+  # inject HERMES_DESKTOP_REMOTE_URL or HERMES_DESKTOP_REMOTE_TOKEN at launch:
+  # when the URL variable is set, Desktop overrides the saved connection and
+  # falls back to token mode, which the dashboard rejects with no_cookie on REST
+  # calls.
+  #
+  # v0.23.0 replaced the desktop package's hand-pinned Electron headers hash
+  # with nixpkgs' `electron.headers`, so the old fetchurl shim is gone. The
+  # flake input follows nixpkgs-unstable, so the package's default `electron` is
+  # already the unstable one and needs no override.
+  hermes-desktop-remote =
+    inputs.nix-hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
 in
 {
   imports = [ ../../common/home.nix ];

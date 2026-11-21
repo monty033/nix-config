@@ -812,7 +812,7 @@ in
     # reads. Pin the release version so version-gated plugins (homeassistant
     # requires >=0.21.5) load. Keep this in sync with the nix-hermes-agent
     # pin in flake.nix.
-    package = pkgs.hermes-agent.override { version = "0.23.0"; };
+    package = pkgs.hermes-agent.override { version = "0.23.3"; };
     addToSystemPackages = true;
     extraDependencyGroups = [ "messaging" "anthropic" "voice" ];
 
