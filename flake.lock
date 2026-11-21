@@ -366,16 +366,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1795269705,
-        "narHash": "sha256-nPZwMUI6/qghHt5pO/cp3cxPBuybgHfog6gooNJvBAg=",
+        "lastModified": 1795280993,
+        "narHash": "sha256-Fvy1AAQRwNXaUOiBWTFkFsbxszJ+MbCZ90afPr3T1lY=",
         "ref": "refs/heads/master",
-        "rev": "35a77a587eadd169eb75a4774a0e1411396e90dd",
-        "revCount": 69,
+        "rev": "b7dade8bbc9c9aea51459dc3636886dd22282536",
+        "revCount": 71,
         "type": "git",
         "url": "https://git.montycasa.net/patrick/tmux-share"
       },
       "original": {
-        "rev": "35a77a587eadd169eb75a4774a0e1411396e90dd",
+        "rev": "b7dade8bbc9c9aea51459dc3636886dd22282536",
         "type": "git",
         "url": "https://git.montycasa.net/patrick/tmux-share"
       }
