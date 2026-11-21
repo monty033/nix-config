@@ -2848,16 +2848,18 @@ if __name__ == "__main__":
   #
   # The socket and transcript names are the reader's contract and do not change:
   # admin.sock and admin.log, in /run/tmux-share. The session name does not
-  # change either. Three things an operator should know before the rebuild:
+  # change either. What an operator should know before the rebuild:
   #
-  #   * The attach command is now `tmux-share`. `tmux-hermes` is gone; it was a
-  #     local wrapper and the module installs the command instead.
-  #   * Two unit names change. The module names units <prefix>-server, -tap and
-  #     -trim, so `tmux-admin.service` becomes `tmux-admin-server.service` and
-  #     `tmux-admin-logtrim` becomes `tmux-admin-trim`. `tmux-admin-tap` keeps its
-  #     name. Nothing else in this repository references the old names.
-  #   * The session is stopped and started once, on the rebuild that adds this.
-  #     Run it while you are not using the session; scrollback is lost.
+  #   * The attach command is `tmux-share`. `tmux-hermes` is gone; it was a local
+  #     wrapper and the module installs the command instead.
+  #   * Every unit is named under the `tmux-share` prefix: the `tmux-admin` units
+  #     are now `tmux-share-server`, `tmux-share-tap` and `tmux-share-trim`. Their
+  #     earlier names described a role; these name the thing. No tracked file
+  #     references the old names.
+  #   * Renaming the server unit stops the running session once, on this rebuild:
+  #     run it while you are not using the session, and expect the scrollback to be
+  #     gone. Nothing else is interrupted, and the transcript file survives this
+  #     rebuild.
   #
   # What the module keeps, per its own documentation (docs/security-model.md and
   # docs/operations.md in the tmux-share repository): the socket is owner-only, so
@@ -2878,7 +2880,7 @@ if __name__ == "__main__":
     directory = "/run/tmux-share";
     socketName = "admin.sock";
     transcriptName = "admin.log";
-    unitPrefix = "tmux-admin";
+    unitPrefix = "tmux-share";
 
     # The shell the operator lands in, and the environment its panes get: this
     # server is not started from a login shell, so it inherits none of that.
@@ -2924,15 +2926,15 @@ if __name__ == "__main__":
   #    and a server that does not come back leaves a dead session name and a tap
   #    with nothing to attach to. Restart=always is what makes the session come
   #    back; the module's own restart policy is for a crash, not for a clean exit.
-  systemd.services.tmux-admin-server.serviceConfig.Restart = lib.mkForce "always";
+  systemd.services.tmux-share-server.serviceConfig.Restart = lib.mkForce "always";
   # 2. No start limit: rate-limiting a supervisor turns a transient failure into a
   #    session that stays down until someone intervenes.
-  systemd.services.tmux-admin-server.unitConfig.StartLimitIntervalSec = 0;
+  systemd.services.tmux-share-server.unitConfig.StartLimitIntervalSec = 0;
   # 3. Editing the generated tmux configuration replaces its store path, and a
   #    server still running the old one would ignore the change. Restarting on
   #    that trigger costs the session and its scrollback, which is the same price
   #    the inline copy charged for the same edit.
-  systemd.services.tmux-admin-server.restartTriggers = [
+  systemd.services.tmux-share-server.restartTriggers = [
     config.environment.etc."tmux-share/tmux.conf".source
   ];
 
