@@ -78,6 +78,12 @@ in
       gnused
       gnumake
       gnutar
+      # Repositories whose gate runs `just test` need both of these in the
+      # host runner's PATH. Without them the job dies at its first command
+      # (`tmux -V`), which looks like a broken workflow rather than a runner
+      # that is missing two packages.
+      just
+      tmux
       glibc
       glibc.static
       glibc.getent
