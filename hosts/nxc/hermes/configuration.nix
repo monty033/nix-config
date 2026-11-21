@@ -1584,6 +1584,17 @@ in
           };
         };
 
+        # Telegram is the lane Patrick actually reads for conversation, reminders
+        # and health cues, so a "gateway shutting down" notice on every rebuild is
+        # noise rather than information. The flag gates three notices: the
+        # shutdown notice, the "gateway online" ping, and the home-channel
+        # equivalent of both. Signal deliberately keeps the default (on): the car
+        # lane is the one place a restart is worth knowing about.
+        telegram = {
+          enabled = true;
+          gateway_restart_notification = false;
+        };
+
         # Signal. The transport is the loopback daemon installed above; this
         # block is what makes the agent use it. The DM allowlist is deliberately
         # NOT here: this repository is published to GitHub, and the allowlist
