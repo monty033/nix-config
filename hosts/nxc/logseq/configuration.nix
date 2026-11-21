@@ -25,10 +25,77 @@
 
   services.openssh.enable = true;
 
-  # Base host only. The Logseq sync container, its data directory under
-  # /var/lib/logseq-sync, and the public vhost on bifrost arrive in follow-up
-  # changes so that a broken package or missing secret cannot block creating
-  # the container itself.
+  virtualisation.podman = {
+    enable = true;
+    defaultNetwork.settings.dns_enabled = true;
+  };
+
+  # Self-hosted Logseq sync server: the community packaging of Logseq's own
+  # deps/db-sync Node adapter. One container holding SQLite metadata plus a
+  # filesystem asset store. Pinned by tag AND digest: the image publishes weekly
+  # builds under dated tags and no semver releases, so the digest is what makes a
+  # bump deliberate. Deliberately no --pull=always, which exists to follow a
+  # moving tag; this image is frozen until someone decides otherwise.
+  virtualisation.oci-containers = {
+    backend = "podman";
+
+    containers.logseq-sync = {
+      image = "ghcr.io/yshalsager/logseq-selfhost-sync:20261115-69da7e2@sha256:edd664f49cf82801d6063f9ac1171feb2e2baae071448726603fa28c5e2c118e";
+
+      volumes = [
+        "/var/lib/logseq-sync/data:/app/data"
+      ];
+
+      environment = {
+        DB_SYNC_PORT = "8787";
+        # This is baked into the asset links the clients fetch, so it must equal
+        # the URL clients are configured with. Changing it means re-pointing
+        # every synced device.
+        DB_SYNC_BASE_URL = "https://logseq.montycasa.com";
+        DB_SYNC_DATA_DIR = "/app/data";
+        DB_SYNC_STORAGE_DRIVER = "sqlite";
+        DB_SYNC_ASSETS_DRIVER = "filesystem";
+        DB_SYNC_LOG_LEVEL = "info";
+
+        # Clients authenticate against Logseq's own identity pool. These are
+        # public identifiers, not secrets, and they are restated here so that a
+        # rotation shows up as a visible change rather than a silent image drift.
+        COGNITO_ISSUER = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_dtagLnju8";
+        COGNITO_CLIENT_ID = "69cs1lgme7p8kbgld8n5kseii6";
+        COGNITO_JWKS_URL = "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_dtagLnju8/.well-known/jwks.json";
+      };
+
+      extraOptions = [
+        # Host networking so the listener is a normal host socket behind INPUT:
+        # nixos-fw drops 8787 on eth0 and ts-input accepts tailscale0. A
+        # published port instead of this would be DNATed through the podman
+        # bridge, which does not pass through INPUT at all. Precedent for host
+        # networking on an LXC: hosts/nxc/paperless-ngx.
+        "--network=host"
+        "--read-only"
+        "--cap-drop=ALL"
+        "--security-opt=no-new-privileges"
+        # The image runs as this uid/gid; the data directory is chowned to match.
+        "--user=65532:65532"
+        # The memory controller is delegated into this container, so the cap is
+        # enforced by cgroup v2 rather than refused by the runtime.
+        "--memory=512m"
+      ];
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /var/lib/logseq-sync 0750 root root -"
+    "d /var/lib/logseq-sync/data 0750 65532 65532 -"
+  ];
+
+  # No firewall rule on purpose. With host networking the service is a plain host
+  # listener on 8787, and the interface decides who reaches it: nothing opens 8787
+  # on eth0, so the LAN and the internet cannot, while Tailscale's ts-input chain is
+  # jumped ahead of nixos-fw and accepts everything arriving on tailscale0. A
+  # tailscale0 rule in nixos-fw would filter nothing (see the note in hosts/nix-fury);
+  # an eth0 rule is exactly what we do not want. The public path is bifrost reaching
+  # http://logseq:8787 over the tailnet.
 
   system.stateVersion = "26.05";
 }
