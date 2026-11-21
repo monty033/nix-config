@@ -290,17 +290,30 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
-    # This revision `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3` is 3 commits
-    # after the previous pin `b98eb8bb906ff6d46bad6cf6fda8a615ada8a791`
-    # (revCount 758 to 761) and is the merge of #323, which enables live
-    # keep-both conflict resolve at the shipped entry point. The startup gate
-    # from #322 stays: a daemon started without `liveConflictResolve` still
-    # refuses both `notes.resolve-conflict` and `notes.abandon-resolve` with
-    # `service_unavailable`. That option is set inside NookBridge's
-    # `productionStartupOptions`, not here, so disabling the surface means an
-    # upstream change and a re-pin, not a host-side toggle.
+    # This revision `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0` is 3 commits
+    # after the previous pin `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3`
+    # (revCount 761 to 764) and lands the merged startup-capability
+    # diagnostic: at startup the daemon writes one `startup.capabilities`
+    # record reporting whether each optional capability was built. Every
+    # field other than the event name is a boolean — no ids, handles, titles,
+    # paths or content. No npm dependency manifest changed across the two
+    # revisions. The record exists so a surface that answers
+    # `service_unavailable` can be told apart from one the daemon never built;
+    # it does not change that answer, only makes it attributable.
+    #
+    # The startup gate holds at this revision too: a daemon started without
+    # `liveConflictResolve` refuses both `notes.resolve-conflict` and
+    # `notes.abandon-resolve` with `service_unavailable`, and that option is
+    # set inside `productionStartupOptions`, not here. Disabling the surface
+    # therefore means an upstream change and a re-pin, not a host-side toggle.
+    #
+    # The revision it replaces, `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3`,
+    # was itself 3 commits after its predecessor
+    # `b98eb8bb906ff6d46bad6cf6fda8a615ada8a791` (revCount 758 to 761) and
+    # enabled live keep-both conflict resolve at the shipped entry point,
+    # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=dcde2b58fe1104c8dcd7455d7ec409d6131abaa3";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0";
       flake = false;
     };
 
