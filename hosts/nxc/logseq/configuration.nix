@@ -67,10 +67,10 @@
 
       extraOptions = [
         # Host networking so the listener is a normal host socket behind INPUT:
-        # nixos-fw drops 8787 on eth0 and ts-input accepts tailscale0. A
-        # published port instead of this would be DNATed through the podman
-        # bridge, which does not pass through INPUT at all. Precedent for host
-        # networking on an LXC: hosts/nxc/paperless-ngx.
+        # nixos-fw admits 8787 on eth0 only from the LAN (see below), and ts-input
+        # accepts tailscale0. A published port instead of this would be DNATed
+        # through the podman bridge, which does not pass through INPUT at all.
+        # Precedent for host networking on an LXC: hosts/nxc/paperless-ngx.
         "--network=host"
         "--read-only"
         "--cap-drop=ALL"
@@ -89,13 +89,36 @@
     "d /var/lib/logseq-sync/data 0750 65532 65532 -"
   ];
 
-  # No firewall rule on purpose. With host networking the service is a plain host
-  # listener on 8787, and the interface decides who reaches it: nothing opens 8787
-  # on eth0, so the LAN and the internet cannot, while Tailscale's ts-input chain is
-  # jumped ahead of nixos-fw and accepts everything arriving on tailscale0. A
-  # tailscale0 rule in nixos-fw would filter nothing (see the note in hosts/nix-fury);
-  # an eth0 rule is exactly what we do not want. The public path is bifrost reaching
+  # The LAN may reach the sync server directly; the guest and IoT VLANs may not.
+  #
+  # Scoped by source address rather than just opening the port, because the router
+  # is not the only thing standing in the way. OPNsense blocks those two VLANs from
+  # private networks with negated-destination rules, so they only get internet
+  # traffic — but two of its rules pass *any* destination for named devices (one
+  # guest host and the shelly plugs), and those would reach this port the moment it
+  # were open to everyone. Matching on source keeps the boundary here even if those
+  # router rules change, provided the router never rewrites sources into
+  # 192.168.86.0/24 and the VLANs stay separate: a forged source address alone gets
+  # the reply sent to whoever really owns that LAN address, so the connection never
+  # opens.
+  #
+  # This host filters with iptables, not nftables, so the rule is written for that
+  # backend. networking.firewall.extraInputRules exists only in the nftables module,
+  # where it is silently ignored under this backend. extraCommands runs after the
+  # standard rules and before the final nixos-fw-log-refuse, and the chain is rebuilt
+  # on every reload, so this neither piles up nor gets jumped past. The rule itself is
+  # inserted at the top of the chain, which is equivalent here because it matches one
+  # port from one source. Target nixos-fw-accept follows hosts/nxc/heimdall. IPv4
+  # only, as there: a LAN client arriving over IPv6 is still refused.
+  #
+  # Tailscale is unaffected: ts-input is jumped ahead of nixos-fw and admits traffic
+  # arriving on tailscale0, which is why there is no tailscale0 rule below (it would
+  # filter nothing — see the note in hosts/nix-fury). The internet still has no path:
+  # nothing forwards or publishes this port, and the public route is bifrost reaching
   # http://logseq:8787 over the tailnet.
+  networking.firewall.extraCommands = ''
+    iptables -w -I nixos-fw 1 -s 192.168.86.0/24 -p tcp --dport 8787 -j nixos-fw-accept
+  '';
 
   system.stateVersion = "26.05";
 }
