@@ -961,17 +961,19 @@ in
         coreToolsets = [ "hermes-cli" "files" "web" "computer" "memory" ];
       in
       {
-      # Default conversation model is DeepSeek V4.1 Flash served directly by the
-      # DeepSeek platform API (provider `deepseek`), not through a reseller. The
-      # ID is `deepseek-flash`, which is what that provider's live /v1/models
-      # returns for this model; the reseller's `deepseek-v4.1-flash` spelling
-      # does not exist on it. No per-model compaction override is declared for
-      # it (see compression below), so it uses the global 300k cap like other
-      # models — deliberately short of its 1M window. Delegation runs MiniMax
-      # M3.1 (below).
+      # Default conversation model is DeepSeek V4.1 Flash served through OpenCode
+      # Go (provider `opencode-go`), the reseller route. The gateway ID there is
+      # `deepseek-v4.1-flash`; the platform API spells the same weights
+      # `deepseek-flash`, which is why the two rows in `aliases` differ by
+      # provider rather than by model. The platform API route stays credentialed
+      # and one command away as `dsflash`, and it is also the first conversation
+      # fallback, so an OpenCode Go outage degrades to the direct route instead
+      # of leaving the family. No per-model compaction override is declared for
+      # either route (see compression below), so both use the global 300k cap
+      # like other models — deliberately short of the model's 1M window.
       model = {
-        default = "deepseek-flash";
-        provider = "deepseek";
+        default = "deepseek-v4.1-flash";
+        provider = "opencode-go";
         # Reasoning effort per model lives in agent.reasoning_overrides below.
         # `model.reasoning_effort` is not a recognized key in this section's
         # schema, so it is not set here.
@@ -986,13 +988,14 @@ in
           mm = "minimax/MiniMax-M3.1-Flash";
           # The default conversation model on its default route. The `flash`
           # name keeps pointing at whatever the default route is.
-          flash = "deepseek/deepseek-flash";
-          # Rollback lever: the reseller route the default used before the
-          # switch to the platform API. Select with `/model ocflash`. Its ID on
-          # that provider is `deepseek-v4.1-flash`, not the direct spelling.
+          flash = "opencode-go/deepseek-v4.1-flash";
+          # Historical name for the reseller route, kept because it is the name
+          # already in muscle memory. While the default is the reseller route it
+          # resolves to the same pair as `flash`; its gateway ID is
+          # `deepseek-v4.1-flash`.
           ocflash = "opencode-go/deepseek-v4.1-flash";
-          # The platform API's route to the same model, kept credentialed and
-          # one command away: `/model dsflash`. Its ID on that provider is
+          # Alternative transport for the same weights, kept credentialed and
+          # one command away: `/model dsflash`. Its ID on the platform API is
           # `deepseek-flash`, not the reseller spelling used above.
           dsflash = "deepseek/deepseek-flash";
         };
@@ -1055,14 +1058,14 @@ in
 
       # Fallbacks are availability routes, not quality routing. Each entry is a
       # separate transport, so one failing leaves the others open. The first
-      # entry is DeepSeek V4.1 Flash through the OpenCode Go gateway — the same
-      # weights as the default, on a different transport, so a DeepSeek API
-      # outage degrades to the reseller rather than leaving the family. Then
-      # Haiku on the subscription provider, then MiniMax M3.1, which also
-      # carries the auxiliary lanes. The gateway id for DeepSeek V4.1 Flash is
-      # `deepseek-v4.1-flash`, not the platform API's `deepseek-flash`.
+      # entry is the same DeepSeek V4.1 Flash weights on the other transport —
+      # the platform API — so a reseller outage degrades to the direct route
+      # rather than leaving the family. Then Haiku on the subscription provider,
+      # then MiniMax M3.1, which also carries the auxiliary lanes. On the
+      # platform API the ID is `deepseek-flash`, not the reseller spelling the
+      # default uses.
       fallback_providers = [
-        { provider = "opencode-go"; model = "deepseek-v4.1-flash"; }
+        { provider = "deepseek"; model = "deepseek-flash"; }
         { provider = "claude-subscription-directsdk-experimental"; model = "claude-haiku-5-5"; }
         { provider = "minimax"; model = "MiniMax-M3.1-Flash"; }
       ];
