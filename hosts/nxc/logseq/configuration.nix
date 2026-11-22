@@ -1,5 +1,125 @@
 { config, pkgs, modulesPath, inputs, outputs, ... }:
 
+let
+  # One definition of "the newest dump is healthy", used both by the 06:00 unit and
+  # by the endpoint an external monitor polls, so the two can never disagree about
+  # what a failure looks like. Exits 0 and prints "ok: <dump> (<n>h old)", or exits
+  # non-zero with the reason on the first line of stderr.
+  backupCheck = pkgs.writeShellScript "logseq-sync-backup-check" ''
+    set -euo pipefail
+
+    root=/var/lib/logseq-sync/backups
+    # The dump runs at 00:30 local and the scheduled check at 06:00: last night's
+    # dump is 4.5-6.5h old there, the one before it at least 28.5h. A check run late
+    # by Persistent sees at most 25h, so 27h fails a single missed night and nothing
+    # healthy.
+    max_age_h=27
+
+    newest=$(find "$root" -mindepth 1 -maxdepth 1 -type d \
+               -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' \
+               -printf '%f\n' | sort -r | head -1)
+    if [ -z "$newest" ]; then
+      echo "no dump in $root" >&2
+      exit 1
+    fi
+
+    # Age comes from the name, not the mtime: opening an old dump moves its mtime.
+    iso=$(printf '%s' "$newest" | sed -E \
+      's/^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z$/\1-\2-\3 \4:\5:\6Z/')
+    age_s=$(( $(date +%s) - $(date -d "$iso" +%s) ))
+    age=$(( age_s / 3600 ))
+    # A stamp from the future means the clock moved. It also sorts above every real
+    # dump, so retention never prunes it and it would read as fresh indefinitely.
+    if [ "$age_s" -lt -300 ]; then
+      echo "newest dump is stamped in the future: $newest" >&2
+      exit 1
+    fi
+    if [ "$age_s" -gt $(( max_age_h * 3600 )) ]; then
+      echo "newest dump is ''${age}h old: $newest" >&2
+      exit 1
+    fi
+
+    # The glob guard below is for an empty graphs/ directory; without this the index
+    # would be skipped too and an empty dump would pass.
+    if [ ! -s "$root/$newest/index.sqlite" ]; then
+      echo "no index in $root/$newest" >&2
+      exit 1
+    fi
+
+    for db in "$root/$newest/index.sqlite" "$root/$newest"/graphs/*.sqlite; do
+      [ -e "$db" ] || continue
+      # Capture sqlite's own complaint too: on a corrupted file it refuses before
+      # printing a result, and that message does not name the file.
+      if ! result=$(${pkgs.sqlite}/bin/sqlite3 -bail "file:$db?mode=ro" 'pragma integrity_check;' 2>&1); then
+        echo "cannot read $db: $result" >&2
+        exit 1
+      fi
+      if [ "$result" != "ok" ]; then
+        echo "integrity check failed for $db: $result" >&2
+        exit 1
+      fi
+    done
+
+    echo "ok: $newest (''${age}h old)"
+  '';
+
+  # The endpoint the external monitor polls. It runs the same check on request rather
+  # than caching, so the answer is never older than the moment it was asked for, and
+  # it maps the result onto HTTP: 200 with "ok: …" when the dump is healthy, 503 with
+  # "down: …" and the reason when it is not. Every request costs one integrity check
+  # of two small databases, which is milliseconds.
+  #
+  # It binds to the LAN address only, and the firewall admits one source: the monitor
+  # host. Nothing here holds a credential, so there is no token to rotate or leak.
+  backupStatus = pkgs.writeScript "logseq-backup-status" ''
+    #!${pkgs.python3}/bin/python3
+    import http.server
+    import subprocess
+    import sys
+
+    BIND = "192.168.86.141"
+    PORT = 8089
+    CHECK = "${backupCheck}"
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        server_version = "logseq-backup-status"
+        # A half-open connection (the monitor host rebooting mid-request) would
+        # otherwise hold a thread forever.
+        timeout = 30
+
+        def do_GET(self):
+            if self.path.split("?", 1)[0] not in ("/", "/status"):
+                self.send_error(404)
+                return
+            try:
+                done = subprocess.run([CHECK], capture_output=True, text=True,
+                                      errors="replace", timeout=60)
+                healthy = done.returncode == 0
+                # Success: the check's own "ok: ..." line, without repeating the prefix.
+                # Failure: the first stderr line is the check's message naming the file;
+                # sqlite's own complaint can run to many lines after it.
+                if healthy:
+                    lines = done.stdout.strip().splitlines()
+                    detail = lines[-1].removeprefix("ok: ") if lines else "no output"
+                else:
+                    lines = done.stderr.strip().splitlines()
+                    detail = lines[0] if lines else "exit %d, no output" % done.returncode
+            except Exception as exc:  # noqa: BLE001 - the monitor wants a reason
+                detail, healthy = "check failed to run: %s" % exc, False
+            body = ("ok: " if healthy else "down: ") + detail + "\n"
+            payload = body.encode()
+            self.send_response(200 if healthy else 503)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, fmt, *args):
+            sys.stderr.write("status: " + fmt % args + "\n")
+
+    http.server.ThreadingHTTPServer((BIND, PORT), Handler).serve_forever()
+  '';
+in
 {
   imports = [
     # Autogenerated configuration specific to the iso, and not included in repo
@@ -247,62 +367,7 @@
       # As for the dump: a hung check stays "activating" and every later firing is a
       # no-op, which would switch the check off silently.
       TimeoutStartSec = "10min";
-      ExecStart = pkgs.writeShellScript "logseq-sync-backup-check" ''
-        set -euo pipefail
-
-        root=/var/lib/logseq-sync/backups
-        # The dump runs at 00:30 local and this at 06:00: last night's dump is 4.5-6.5h
-        # old here, the one before it at least 28.5h. A check run late by Persistent
-        # sees at most 25h, so 27h fails a single missed night and nothing healthy.
-        max_age_h=27
-
-        newest=$(find "$root" -mindepth 1 -maxdepth 1 -type d \
-                   -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' \
-                   -printf '%f\n' | sort -r | head -1)
-        if [ -z "$newest" ]; then
-          echo "no dump in $root" >&2
-          exit 1
-        fi
-
-        # Age comes from the name, not the mtime: opening an old dump moves its mtime.
-        iso=$(printf '%s' "$newest" | sed -E \
-          's/^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z$/\1-\2-\3 \4:\5:\6Z/')
-        age_s=$(( $(date +%s) - $(date -d "$iso" +%s) ))
-        age=$(( age_s / 3600 ))
-        # A stamp from the future means the clock moved. It also sorts above every real
-        # dump, so retention never prunes it and it would read as fresh indefinitely.
-        if [ "$age_s" -lt -300 ]; then
-          echo "newest dump is stamped in the future: $newest" >&2
-          exit 1
-        fi
-        if [ "$age_s" -gt $(( max_age_h * 3600 )) ]; then
-          echo "newest dump is ''${age}h old: $newest" >&2
-          exit 1
-        fi
-
-        # The glob guard below is for an empty graphs/ directory; without this the
-        # index would be skipped too and an empty dump would pass.
-        if [ ! -s "$root/$newest/index.sqlite" ]; then
-          echo "no index in $root/$newest" >&2
-          exit 1
-        fi
-
-        for db in "$root/$newest/index.sqlite" "$root/$newest"/graphs/*.sqlite; do
-          [ -e "$db" ] || continue
-          # Capture sqlite's own complaint too: on a corrupted file it refuses before
-          # printing a result, and that message does not name the file.
-          if ! result=$(${pkgs.sqlite}/bin/sqlite3 -bail "file:$db?mode=ro" 'pragma integrity_check;' 2>&1); then
-            echo "cannot read $db: $result" >&2
-            exit 1
-          fi
-          if [ "$result" != "ok" ]; then
-            echo "integrity check failed for $db: $result" >&2
-            exit 1
-          fi
-        done
-
-        echo "ok: $newest (''${age}h old)"
-      '';
+      ExecStart = backupCheck;
     };
   };
 
@@ -313,6 +378,32 @@
       OnCalendar = "*-*-* 06:00:00";
       # A missed check is worth running late: its whole job is to notice gaps.
       Persistent = true;
+    };
+  };
+
+  # What the external monitor polls. The scheduled check above is what makes a failure
+  # a failed unit on this guest; this is what makes it a DOWN in something that can
+  # tell somebody, which a unit on a quiet machine cannot do by itself.
+  systemd.services.logseq-backup-status = {
+    description = "Report the newest sync dump's health over HTTP for an external monitor";
+    wantedBy = [ "multi-user.target" ];
+    # No network-online ordering: Proxmox assigns the address before init, and if it is
+    # ever missing the bind fails and Restart retries it.
+    serviceConfig = {
+      ExecStart = backupStatus;
+      Restart = "always";
+      RestartSec = 30;
+      # Reads root-owned dumps as root: owner permissions suffice, so no capabilities,
+      # and the port is above 1024 so binding needs none either.
+      CapabilityBoundingSet = "";
+      NoNewPrivileges = true;
+      ProtectSystem = "strict";
+      PrivateTmp = true;
+      ProtectHome = true;
+      # The live data, key material included, is never this service's business.
+      InaccessiblePaths = [ "/var/lib/logseq-sync/data" ];
+      RestrictAddressFamilies = [ "AF_INET" "AF_UNIX" ];
+      MemoryMax = "128M";
     };
   };
 
@@ -343,8 +434,16 @@
   # filter nothing — see the note in hosts/nix-fury). The internet still has no path:
   # nothing forwards or publishes this port, and the public route is bifrost reaching
   # http://logseq:8787 over the tailnet.
+  # The status endpoint is narrower still: one source, the monitor host. It answers an
+  # unauthenticated GET, so on eth0 the source address is the whole authorization — and
+  # it authorizes the host, not the process: anything that leaves 192.168.86.106 as that
+  # address, containers NATed through it included, is "the monitor". tailscale0 is
+  # admitted by ts-input ahead of this chain, which reaches nothing here because the
+  # listener is bound to the LAN address, unless this guest ever advertises the LAN as a
+  # subnet route.
   networking.firewall.extraCommands = ''
     iptables -w -I nixos-fw 1 -s 192.168.86.0/24 -p tcp --dport 8787 -j nixos-fw-accept
+    iptables -w -I nixos-fw 1 -s 192.168.86.106 -p tcp --dport 8089 -j nixos-fw-accept
   '';
 
   system.stateVersion = "26.05";
