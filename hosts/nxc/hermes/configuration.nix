@@ -31,6 +31,13 @@ let
   opencode-claude = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-claude;
   opencode-goal-plugin = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-goal-plugin;
   opencode-api = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.opencode-api;
+  # Antigravity CLI (`agy`), the successor to Gemini CLI for individual Google
+  # AI accounts. This puts the binary on the host profile and on the agent
+  # service PATH only: no Hermes provider, toolset or delegation route consumes
+  # it yet, so it is a CLI to drive from a terminal rather than a model lane. The
+  # dashboard has its own `path` and is left untouched here. Unfree licence; the
+  # flake instantiates nixpkgs with allowUnfree for this package alone.
+  antigravity-cli = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.antigravity-cli;
   # Tier dispatcher. Its base roster is a separate artifact, installed read-only
   # at /etc/hermes/routing/models below; a local overlay may extend or override
   # any entry per model id.
@@ -698,6 +705,7 @@ in
     opencode-v2
     opencode-api
     oc-tier
+    antigravity-cli
     graphviz
     # Signal lane: the released client, not the nixpkgs build. Signal's servers
     # reject the older packaged version, and it cannot open an account store
@@ -940,7 +948,7 @@ in
     # The dashboard has its own `path` and runs no quick commands, so it needs
     # no matching entry; scripts needing Hermes' own runtime are still run by
     # the agent rather than from PATH.
-    extraPackages = [ claudeCodeForHermes pkgs.gnupg pkgs.python312 ];
+    extraPackages = [ claudeCodeForHermes pkgs.gnupg pkgs.python312 antigravity-cli ];
     extraPythonPackages = [
       mnemosyneMemory
       mnemosyneHermes

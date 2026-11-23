@@ -371,6 +371,14 @@
       opencode-goal-plugin = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-goal-plugin.nix { };
       opencode-api = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/opencode-api.nix { };
       provider-usage-graph = nixpkgs.legacyPackages.x86_64-linux.callPackage ./packages/provider-usage-graph.nix { };
+      # Antigravity CLI carries an unfree licence, and `legacyPackages` above
+      # defaults to allowUnfree = false, which makes the licence check fail
+      # evaluation rather than the build. This instantiation permits it; hosts
+      # consume the result the same way they consume the packages above.
+      antigravity-cli = (import nixpkgs {
+        system = "x86_64-linux";
+        config.allowUnfree = true;
+      }).callPackage ./packages/antigravity-cli.nix { };
     };
 
     # `nix fmt` formats the tree with this.
