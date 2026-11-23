@@ -913,7 +913,9 @@ in
       # Claude Pro/Max via the official Claude Code CLI. The default
       # conversation route runs on the DeepSeek platform API directly, so this
       # plugin supplies the subscription fallback route and the Claude aliases.
-      claudeSubscriptionDirectsdkPlugin
+      # NOT listed here: it is installed as a writable copy by
+      # system.activationScripts.hermesDirectsdkProviderPlugin below, because a
+      # store-symlinked plugin cannot be loaded at all — see that script.
       # Proton Mail/Calendar/Contacts/Drive. Reads and writes are both enabled:
       # the recipient allowlist comes from the hermes-proton-env sops secret
       # (see sops.secrets below) and the plugin's pre_tool_call hook raises an
@@ -2733,6 +2735,74 @@ if __name__ == "__main__":
       ${pkgs.systemd}/bin/systemctl start "user@''${hermes_uid}.service"
     fi
   '';
+
+  # Provider plugins go through a freeze-and-publish step: Hermes copies the
+  # plugin into a private directory and publishes that copy with os.rename(2).
+  # Linux refuses to rename a directory the caller cannot write, and every
+  # /nix/store path is read-only, so a plugin symlinked from the store
+  # (services.hermes-agent.extraPlugins) fails that step on every scan: the
+  # provider never registers, its aliases are reported as an unknown provider,
+  # and sessions silently run on their fallback model while the only symptom is
+  # the warning "Could not stage provider plugin". A real, owner-writable
+  # directory under the home makes the copy writable. It is refreshed from the
+  # pinned store tree on every switch, so pin bumps still take effect. Drop this
+  # once the loader chmods its own copy.
+  system.activationScripts.hermesDirectsdkProviderPlugin =
+    lib.stringAfter [ "users" ] ''
+      set -eu
+      hermesHome=${lib.escapeShellArg "${config.services.hermes-agent.stateDir}/.hermes"}
+      pluginName=${lib.escapeShellArg (lib.getName claudeSubscriptionDirectsdkPlugin)}
+      pluginDir="$hermesHome/plugins/$pluginName"
+
+      # Staging lives outside the directory the loader scans, on the same
+      # filesystem, so a concurrent scan can never freeze a half-written tree and
+      # the swap is a plain rename.
+      stagingRoot="$hermesHome/.plugin-staging"
+      staging="$stagingRoot/$pluginName"
+      previous="$stagingRoot/$pluginName.old"
+
+      if [ ! -d "$hermesHome/plugins" ]; then
+        ${pkgs.coreutils}/bin/install -d -m 2770 \
+          -o ${lib.escapeShellArg config.services.hermes-agent.user} \
+          -g ${lib.escapeShellArg config.services.hermes-agent.group} "$hermesHome/plugins"
+      fi
+      ${pkgs.coreutils}/bin/install -d -m 2770 \
+        -o ${lib.escapeShellArg config.services.hermes-agent.user} \
+        -g ${lib.escapeShellArg config.services.hermes-agent.group} "$stagingRoot"
+
+      # The plugin used to be installed as a managed symlink into the store. That
+      # symlink cannot be staged, and if it survives beside the copy the same
+      # provider is registered twice while the scan keeps failing. The name comes
+      # from the same lib.getName the agent module uses for the symlink.
+      managedSymlink="nix-managed-$pluginName"
+      ${pkgs.findutils}/bin/find "$hermesHome/plugins" -maxdepth 1 -type l -name "$managedSymlink" -delete
+      stale="$(${pkgs.findutils}/bin/find "$hermesHome/plugins" -maxdepth 1 -type l -name "$managedSymlink")"
+      if [ -n "$stale" ]; then
+        echo "hermes-agent: ERROR stale managed symlink for $pluginName survives: $stale" >&2
+        exit 1
+      fi
+
+      # Build the replacement beside the plugins directory and swap it in, so the
+      # live copy is only ever replaced by a complete one.
+      ${pkgs.coreutils}/bin/rm -rf "$staging" "$previous"
+      ${pkgs.coreutils}/bin/cp -rT ${lib.escapeShellArg "${claudeSubscriptionDirectsdkPlugin}"} "$staging"
+      ${pkgs.coreutils}/bin/chown -R ${lib.escapeShellArg "${config.services.hermes-agent.user}:${config.services.hermes-agent.group}"} "$staging"
+      ${pkgs.coreutils}/bin/chmod -R u+rwX "$staging"
+      if [ ! -f "$staging/plugin.yaml" ]; then
+        echo "hermes-agent: ERROR staged plugin $pluginName has no plugin.yaml" >&2
+        exit 1
+      fi
+
+      if [ -d "$pluginDir" ]; then
+        ${pkgs.coreutils}/bin/mv -T "$pluginDir" "$previous"
+      fi
+      ${pkgs.coreutils}/bin/mv -T "$staging" "$pluginDir"
+      ${pkgs.coreutils}/bin/rm -rf "$previous"
+
+      # Activation snippets run inline in one shell, so the strictness above is
+      # turned back off here instead of leaking into the snippets that follow.
+      set +eu
+    '';
 
   users.users.root.linger = true;
 
