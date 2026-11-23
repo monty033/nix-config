@@ -105,6 +105,29 @@ def unfold_ical(text: str) -> str:
     return "\n".join(unfolded)
 
 
+def recurrence_value(prop):
+    """Unwrap an icalendar recurrence property into plain date/datetime values.
+
+    ``EXDATE``/``RDATE`` parse to ``vDDDLists`` whose ``.dts`` holds ``vDDDTypes``
+    wrappers, and ``RECURRENCE-ID`` parses to a single ``vDDDTypes``. Passing a
+    wrapper back to ``Event.add()`` raises ValueError, so writing an event from a
+    parsed one loses the exclusion dates unless they are unwrapped here.
+    """
+    if isinstance(prop, list):
+        flattened = []
+        for item in prop:
+            value = recurrence_value(item)
+            flattened.extend(value if isinstance(value, list) else [value])
+        return flattened
+    values = getattr(prop, "dts", None)
+    if values is not None:
+        return recurrence_value([getattr(item, "dt", item) for item in values])
+    single = getattr(prop, "dt", None)
+    if single is not None:
+        return single
+    return prop
+
+
 def parse_ical_file(path: str) -> list[dict]:
     """Parse an iCal file and return list of event dicts."""
     import icalendar
@@ -158,12 +181,7 @@ def parse_ical_file(path: str) -> list[dict]:
         # Preserve recurrence rules for output
         for prop_name in ("rrule", "exdate", "rdate", "recurrence-id"):
             if prop_name in component:
-                prop = component[prop_name]
-                # vDDDTypes objects contain .dts (list of datetime/date)
-                if hasattr(prop, 'dts'):
-                    event[prop_name] = list(prop.dts)
-                else:
-                    event[prop_name] = prop
+                event[prop_name] = recurrence_value(component[prop_name])
 
         # Make datetime offset-aware using local timezone (handles DST correctly)
         if isinstance(event["start"], datetime) and event["start"].tzinfo is None:
@@ -324,10 +342,41 @@ def generate_ical(calendar_name: str, events: list[dict]) -> str:
                             fixed_until.append(u)
                         val["UNTIL"] = fixed_until
 
+                params = None
+                if prop_name in ("exdate", "rdate"):
+                    # EXDATE/RDATE must agree with DTSTART: Google emits floating
+                    # local times, and an all-day series needs DATE values. A
+                    # mismatch means the exclusion never cancels the occurrence.
+                    values = val if isinstance(val, list) else [val]
+                    start = event.get("start")
+                    if event.get("all_day"):
+                        # A DATE DTSTART takes DATE exclusions. The value type
+                        # must be stated explicitly (RFC 5545 defaults EXDATE to
+                        # DATE-TIME), and the library rejects vDate here.
+                        values = [
+                            v.date() if isinstance(v, datetime) else v
+                            for v in values
+                        ]
+                        params = {"VALUE": "DATE"}
+                    elif isinstance(start, datetime) and start.tzinfo is not None:
+                        values = [
+                            v.replace(tzinfo=start.tzinfo)
+                            if isinstance(v, datetime) and v.tzinfo is None
+                            else v
+                            for v in values
+                        ]
+                    val = values
+
                 try:
-                    vevent.add(prop_name, val)
-                except (ValueError, TypeError):
-                    pass  # skip unparseable recurrence prop
+                    vevent.add(prop_name, val, parameters=params)
+                except (ValueError, TypeError) as exc:
+                    # Never drop a recurrence property silently: losing EXDATE
+                    # puts a cancelled instance back on every dashboard. Log the
+                    # property and error type only — never the event content.
+                    print(
+                        f"calendar router: dropped {prop_name.upper()} ({type(exc).__name__})",
+                        file=sys.stderr,
+                    )
 
         if event.get("all_day"):
             start_dt = event["start"]

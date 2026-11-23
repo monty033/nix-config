@@ -591,6 +591,117 @@ class FamilyCalendarRouterTests(unittest.TestCase):
 
         return subprocess.CompletedProcess(args, 0)
 
+RECURRING_EXDATE_ICAL = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//MontyCasa//Family Calendar//EN
+BEGIN:VEVENT
+UID:weekly-class@example.com
+DTSTART;TZID=America/New_York:20250901T183000
+DTEND;TZID=America/New_York:20250901T193000
+RRULE:FREQ=WEEKLY;UNTIL=20260601T035959Z
+EXDATE;TZID=America/New_York:20250915T183000
+EXDATE;TZID=America/New_York:20250922T183000
+RDATE;TZID=America/New_York:20250916T183000
+DESCRIPTION:#ali
+SUMMARY:Weekly class
+END:VEVENT
+END:VCALENDAR
+"""
+
+# Google emits floating local times for both the series and its exclusions.
+FLOATING_EXDATE_ICAL = """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:floating-class@example.com
+DTSTART:20250914T183000
+DTEND:20250914T193000
+RRULE:FREQ=WEEKLY;UNTIL=20270606T035959Z
+EXDATE:20251123T183000
+DESCRIPTION:#ali
+SUMMARY:Floating weekly class
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+def recurrence_dates(prop):
+    """Return the date values from a parsed EXDATE/RDATE property of any shape."""
+    items = prop if isinstance(prop, list) else [prop]
+    dates = []
+    for item in items:
+        for value in getattr(item, "dts", [item]):
+            for leaf in (value if isinstance(value, list) else [value]):
+                dates.append(getattr(leaf, "dt", leaf))
+    return sorted(dates)
+
+
+class RecurrencePassthroughTests(unittest.TestCase):
+    def test_exclusion_dates_survive_the_published_feed(self):
+        events = router.parse_ical_string(RECURRING_EXDATE_ICAL, source="google")
+        calendars = router.route_events(events)
+        self.assertIn("aleandra", calendars)
+        published = router.generate_ical("aleandra", calendars["aleandra"])
+
+        import icalendar
+
+        vevent = next(c for c in icalendar.Calendar.from_ical(published).walk("VEVENT"))
+        exdates = recurrence_dates(vevent["exdate"])
+        self.assertEqual(
+            [d.date().isoformat() for d in exdates],
+            ["2025-09-15", "2025-09-22"],
+            "A cancelled instance must not reappear on the dashboard",
+        )
+        self.assertTrue(all(d.tzinfo is not None for d in exdates),
+                        "a TZID exclusion must stay tz-aware to match its occurrence")
+
+    def test_extra_dates_survive_the_published_feed(self):
+        events = router.parse_ical_string(RECURRING_EXDATE_ICAL, source="google")
+        published = router.generate_ical("aleandra", router.route_events(events)["aleandra"])
+
+        import icalendar
+
+        vevent = next(c for c in icalendar.Calendar.from_ical(published).walk("VEVENT"))
+        self.assertEqual(
+            [d.date().isoformat() for d in recurrence_dates(vevent["rdate"])],
+            ["2025-09-16"],
+        )
+
+    def test_floating_exclusion_dates_are_published_timezone_aware(self):
+        events = router.parse_ical_string(FLOATING_EXDATE_ICAL, source="google")
+        published = router.generate_ical("aleandra", router.route_events(events)["aleandra"])
+
+        import icalendar
+
+        vevent = next(c for c in icalendar.Calendar.from_ical(published).walk("VEVENT"))
+        dates = recurrence_dates(vevent["exdate"])
+        self.assertEqual([d.date().isoformat() for d in dates], ["2025-11-23"])
+        self.assertIsNotNone(dates[0].tzinfo, "floating EXDATE must match the tz-aware DTSTART")
+
+    def test_all_day_exclusion_stays_a_date_value(self):
+        ical_text = FLOATING_EXDATE_ICAL.replace(
+            "DTSTART:20250914T183000", "DTSTART;VALUE=DATE:20250914"
+        ).replace("DTEND:20250914T193000", "DTEND;VALUE=DATE:20250915").replace(
+            "EXDATE:20251123T183000", "EXDATE;VALUE=DATE:20251123"
+        )
+        events = router.parse_ical_string(ical_text, source="google")
+        published = router.generate_ical("aleandra", router.route_events(events)["aleandra"])
+        self.assertIn("EXDATE;VALUE=DATE:20251123", published)
+
+        import icalendar
+        from datetime import date as date_type
+
+        vevent = next(c for c in icalendar.Calendar.from_ical(published).walk("VEVENT"))
+        values = recurrence_dates(vevent["exdate"])
+        self.assertEqual([v.isoformat() for v in values], ["2025-11-23"])
+        self.assertIsInstance(values[0], date_type)
+        self.assertNotIsInstance(values[0], datetime)
+
+    def test_recurrence_rule_still_survives_the_published_feed(self):
+        events = router.parse_ical_string(RECURRING_EXDATE_ICAL, source="google")
+        published = router.generate_ical("aleandra", router.route_events(events)["aleandra"])
+        self.assertIn("RRULE:FREQ=WEEKLY;UNTIL=20260601T035959Z", published)
+
+
 class HeartbeatTests(unittest.TestCase):
     """The publisher's liveness signal, read by the watchdog."""
 
