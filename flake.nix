@@ -290,16 +290,18 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
-    # This revision `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0` is 3 commits
-    # after the previous pin `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3`
-    # (revCount 761 to 764) and lands the merged startup-capability
-    # diagnostic: at startup the daemon writes one `startup.capabilities`
-    # record reporting whether each optional capability was built. Every
-    # field other than the event name is a boolean — no ids, handles, titles,
-    # paths or content. No npm dependency manifest changed across the two
-    # revisions. The record exists so a surface that answers
-    # `service_unavailable` can be told apart from one the daemon never built;
-    # it does not change that answer, only makes it attributable.
+    # This revision `bf365febeb1ac3c5083e08c501600eadbe0768eb` is 2 commits
+    # after the previous pin `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0`
+    # (revCount 764 to 766) and lands the operator-refusal record: an operator
+    # request refused after admission, other than a policy denial, is recorded
+    # with the method, the reply code — or `no_reply` when the connection
+    # closed without an envelope — a reason from a closed set and an error
+    # class from a fixed allow-list. A policy denial and a request rejected
+    # before dispatch write no line. No message, stack, parameters, handle,
+    # title or path is recorded, the diagnostic cannot change a reply, the
+    # lines are capped per reason per minute, and a routine categorized
+    # refusal such as `not_found` is logged like any other. No npm dependency
+    # manifest changed across the two revisions.
     #
     # The startup gate holds at this revision too: a daemon started without
     # `liveConflictResolve` refuses both `notes.resolve-conflict` and
@@ -307,13 +309,19 @@
     # set inside `productionStartupOptions`, not here. Disabling the surface
     # therefore means an upstream change and a re-pin, not a host-side toggle.
     #
-    # The revision it replaces, `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3`,
-    # was itself 3 commits after its predecessor
+    # The revision it replaces, `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0`,
+    # was 3 commits after its predecessor and added the startup
+    # `startup.capabilities` record, which reports whether each optional
+    # capability was built. Every field there other than the event name is a
+    # boolean, and it changed no answer — it made one attributable.
+    #
+    # Before that, `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3` was 3 commits
+    # after its predecessor
     # `b98eb8bb906ff6d46bad6cf6fda8a615ada8a791` (revCount 758 to 761) and
     # enabled live keep-both conflict resolve at the shipped entry point,
     # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=bf365febeb1ac3c5083e08c501600eadbe0768eb";
       flake = false;
     };
 
