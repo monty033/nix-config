@@ -290,18 +290,29 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
-    # This revision `bf365febeb1ac3c5083e08c501600eadbe0768eb` is 2 commits
-    # after the previous pin `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0`
-    # (revCount 764 to 766) and lands the operator-refusal record: an operator
-    # request refused after admission, other than a policy denial, is recorded
-    # with the method, the reply code — or `no_reply` when the connection
-    # closed without an envelope — a reason from a closed set and an error
-    # class from a fixed allow-list. A policy denial and a request rejected
-    # before dispatch write no line. No message, stack, parameters, handle,
-    # title or path is recorded, the diagnostic cannot change a reply, the
-    # lines are capped per reason per minute, and a routine categorized
-    # refusal such as `not_found` is logged like any other. No npm dependency
-    # manifest changed across the two revisions.
+    # This revision `7f2740c36c7d9beada833b5162d2d5274d106ea1` is 2 commits
+    # after the previous pin `bf365febeb1ac3c5083e08c501600eadbe0768eb`
+    # (revCount 766 to 768) and records five drops the operator socket makes
+    # before dispatch: a frame that cannot be parsed, one whose declared length
+    # is unusable, one that overflows the frame limit while being read, a
+    # method this socket does not carry, and a peer it cannot identify. Each
+    # records `no_reply` with the fixed method `(unattributed)`, because the
+    # daemon has no method it can vouch for. The wire is unchanged — the
+    # connection still closes. Other drops stay unrecorded: the idle and
+    # lifetime timeouts, a client that leaves before or during its frame, one
+    # that leaves after its frame but before it is identified, the
+    # connection-cap drop, and the sockets closed at exit. The upstream
+    # `docs/security-and-privacy.md` lists them. No npm dependency manifest
+    # changed across the two revisions.
+    #
+    # The revision it replaces,
+    # `bf365febeb1ac3c5083e08c501600eadbe0768eb`, was 2 commits after its own
+    # predecessor `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0` (revCount 764 to
+    # 766) and introduced that record for requests refused after admission: an
+    # unwired runtime, a categorized runtime refusal, an uncaught throw, a
+    # failing authorization step or an unserializable reply each recorded their
+    # method, the reply code, why the refusal happened and a fixed error class,
+    # with no message, stack, parameters, handle, title or path.
     #
     # The startup gate holds at this revision too: a daemon started without
     # `liveConflictResolve` refuses both `notes.resolve-conflict` and
@@ -321,7 +332,7 @@
     # enabled live keep-both conflict resolve at the shipped entry point,
     # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=bf365febeb1ac3c5083e08c501600eadbe0768eb";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=7f2740c36c7d9beada833b5162d2d5274d106ea1";
       flake = false;
     };
 
