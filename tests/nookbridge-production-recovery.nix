@@ -575,6 +575,14 @@ in
               ownership = machine.succeed(
                   "stat -c '%U %G %a' " + path
               ).strip()
+              # KNOWN RED until nix-config issue #621 is fixed: the members
+              # inherit the state root's group, which the unit sets to
+              # `nookbridge-clients` (modules/nookbridge.nix Group and
+              # StateDirectory), not the service user's own group. The
+              # expectation below still encodes the process group from before
+              # upstream NookBridge PR #314, so this assertion fails; it fails
+              # the same way at pin 7f2740c and at 308cc39, so it is not a pin
+              # regression. Owner, mode and link count are correct.
               assert ownership == "nookbridge nookbridge 600", (member, ownership)
               # The wrapper starts nookd after a successful reinitialize, so a
               # zero-length sample here would race the daemon's first open.

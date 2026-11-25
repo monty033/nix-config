@@ -290,41 +290,73 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
-    # This revision `7f2740c36c7d9beada833b5162d2d5274d106ea1` is 2 commits
-    # after the previous pin `bf365febeb1ac3c5083e08c501600eadbe0768eb`
-    # (revCount 766 to 768) and records five drops the operator socket makes
-    # before dispatch: a frame that cannot be parsed, one whose declared length
-    # is unusable, one that overflows the frame limit while being read, a
-    # method this socket does not carry, and a peer it cannot identify. Each
-    # records `no_reply` with the fixed method `(unattributed)`, because the
-    # daemon has no method it can vouch for. The wire is unchanged — the
-    # connection still closes. Other drops stay unrecorded: the idle and
-    # lifetime timeouts, a client that leaves before or during its frame, one
-    # that leaves after its frame but before it is identified, the
-    # connection-cap drop, and the sockets closed at exit. The upstream
-    # `docs/security-and-privacy.md` lists them. No npm dependency manifest
-    # changed across the two revisions.
+    # This revision `308cc3949e30dd372bd016d530bbfe11c9e40eca` is 2 commits
+    # after the previous pin `7f2740c36c7d9beada833b5162d2d5274d106ea1`
+    # (revCount 768 to 770) and adds an optional `operatorAccess` block to the
+    # service configuration (upstream PR #328). It maps principals — a group or a
+    # user — to the capability families `discover`, `read`, `write`, `conflict`
+    # and `admin`. The gate is the first step of the operator authorizer, so a
+    # peer holding no grant for the method's family is refused before its handle
+    # is resolved and before any lock state or notebook policy is read; `admin`
+    # is grantable only to `nookbridge-operators`, whose methods carry upload
+    # approval. The families cover the OPERATOR socket only: the daemon socket
+    # keeps its separate closed `readPolicy` allowlist, which this block does not
+    # touch.
+    #
+    # This deployment is unaffected unless the service configuration gains the
+    # block, which is a separate change: `modules/nookbridge/service.json` does
+    # not carry one, and with no block the implicit policy still grants every
+    # family to `nookbridge-operators` by name. `nookop` is admitted that way: its
+    # primary group is `nookop` and it holds `nookbridge-operators` only in
+    # `extraGroups` (`modules/nookbridge.nix`, the `nookop` user block), so the
+    # name match is what admits it, exactly as before. No account here has that
+    # group as its effective group — `nookop` does not, and `hermes` is asserted
+    # never to hold the group at all (`hosts/nxc/hermes/configuration.nix`) — so
+    # the effective-gid rule cannot change who is admitted on this host.
+    # A block, if one is ever added, REPLACES that implicit entry: it must list
+    # `nookbridge-operators` itself to keep any family for the packaged operator
+    # path.
+    #
+    # One upstream default-path rule does change: with no block the base group's
+    # gid is resolved at startup and a grant matches a peer by supplementary
+    # group name OR by effective gid (`operator-capabilities.ts`,
+    # `createOperatorAccessPolicy`). That widens admission only for an account
+    # whose effective group is `nookbridge-operators`, which was previously
+    # refused everything because the peer helper's group list never names the
+    # effective group. The lookup is the base group's own record; if it fails or
+    # returns nothing, the policy keeps the unresolved sentinel and matches by
+    # name alone, which is the old behaviour — fail-closed, never fail-open.
+    # No npm dependency manifest changed across the two revisions, which is why
+    # `packages/nookbridge.nix` keeps the same `npmDepsHash` and the package
+    # still builds.
     #
     # The revision it replaces,
-    # `bf365febeb1ac3c5083e08c501600eadbe0768eb`, was 2 commits after its own
-    # predecessor `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0` (revCount 764 to
-    # 766) and introduced that record for requests refused after admission: an
-    # unwired runtime, a categorized runtime refusal, an uncaught throw, a
-    # failing authorization step or an unserializable reply each recorded their
-    # method, the reply code, why the refusal happened and a fixed error class,
-    # with no message, stack, parameters, handle, title or path.
+    # `7f2740c36c7d9beada833b5162d2d5274d106ea1`, was 2 commits after its own
+    # predecessor `bf365febeb1ac3c5083e08c501600eadbe0768eb` (revCount 766 to
+    # 768) and recorded the five requests the operator socket drops before
+    # dispatch: an unparseable frame, an unusable declared length, a frame that
+    # overflows the limit, a method this socket does not carry, and a peer it
+    # cannot identify. Each recorded `no_reply` with the fixed method
+    # `(unattributed)`; the wire was unchanged.
     #
-    # The startup gate holds at this revision too: a daemon started without
-    # `liveConflictResolve` refuses both `notes.resolve-conflict` and
-    # `notes.abandon-resolve` with `service_unavailable`, and that option is
-    # set inside `productionStartupOptions`, not here. Disabling the surface
-    # therefore means an upstream change and a re-pin, not a host-side toggle.
+    # The refusal path still exists upstream at this revision, and it fires only
+    # when the option is absent: a daemon started WITHOUT `liveConflictResolve`
+    # refuses both `notes.resolve-conflict` and `notes.abandon-resolve` with
+    # `service_unavailable` (`src/nookd.ts:439` reads the option). It does not
+    # fire here, because the shipped entry point SETS it
+    # (`productionStartupOptions`), which is what `nookd --config …` in
+    # `modules/nookbridge.nix` starts — so live conflict resolve is live on this
+    # host. The settings a host renders are a closed schema (the
+    # `upload`/`defaults`/`overrides` sections in
+    # `modules/nookbridge/settings.nix`), so a host cannot set the option either
+    # way: disabling the surface means an upstream change and a re-pin, not a
+    # host-side toggle.
     #
-    # The revision it replaces, `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0`,
-    # was 3 commits after its predecessor and added the startup
-    # `startup.capabilities` record, which reports whether each optional
-    # capability was built. Every field there other than the event name is a
-    # boolean, and it changed no answer — it made one attributable.
+    # Before that, `cb08bc66ea64dac343510c5ec0189b6e1b9c7ad0` was 3 commits after
+    # its predecessor and added the startup `startup.capabilities` record, which
+    # reports whether each optional capability was built. Every field there other
+    # than the event name is a boolean, and it changed no answer — it made one
+    # attributable.
     #
     # Before that, `dcde2b58fe1104c8dcd7455d7ec409d6131abaa3` was 3 commits
     # after its predecessor
@@ -332,7 +364,7 @@
     # enabled live keep-both conflict resolve at the shipped entry point,
     # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=7f2740c36c7d9beada833b5162d2d5274d106ea1";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=308cc3949e30dd372bd016d530bbfe11c9e40eca";
       flake = false;
     };
 
