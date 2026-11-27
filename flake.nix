@@ -290,11 +290,16 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
-    # This revision `9acb0e2d0e5679eb0231318d2c00869e2c3158ca` is 24 commits
-    # after the previous pin `308cc3949e30dd372bd016d530bbfe11c9e40eca`
+    # This revision `7c56dbdba4491a8200f2a1fff5d5f7784263d72c` is 3 commits
+    # after the previous pin `9acb0e2d0e5679eb0231318d2c00869e2c3158ca`
+    # (revCount 794 to 797). No npm dependency manifest changed across it, so
+    # `npmDepsHash` is unchanged.
+    #
+    # The revision before it `9acb0e2d0e5679eb0231318d2c00869e2c3158ca` is 24
+    # commits after `308cc3949e30dd372bd016d530bbfe11c9e40eca`
     # (revCount 770 to 794).
     #
-    # The pin before this one `308cc3949e30dd372bd016d530bbfe11c9e40eca` was 2
+    # The pin before that `308cc3949e30dd372bd016d530bbfe11c9e40eca` was 2
     # commits after the previous pin `7f2740c36c7d9beada833b5162d2d5274d106ea1`
     # (revCount 768 to 770) and adds an optional `operatorAccess` block to the
     # service configuration (upstream PR #328). It maps principals — a group or a
@@ -368,7 +373,7 @@
     # enabled live keep-both conflict resolve at the shipped entry point,
     # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=9acb0e2d0e5679eb0231318d2c00869e2c3158ca";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=7c56dbdba4491a8200f2a1fff5d5f7784263d72c";
       flake = false;
     };
 
