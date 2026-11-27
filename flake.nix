@@ -290,6 +290,11 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
+    # This revision `f5e1b39a2f91db2f53edf3f4040795f29ff70e66` is 3 commits
+    # after the previous pin `7c56dbdba4491a8200f2a1fff5d5f7784263d72c`
+    # (revCount 797 to 800). `package.json` and `package-lock.json` are
+    # unchanged between the two pins, so `npmDepsHash` is unchanged.
+    #
     # This revision `7c56dbdba4491a8200f2a1fff5d5f7784263d72c` is 3 commits
     # after the previous pin `9acb0e2d0e5679eb0231318d2c00869e2c3158ca`
     # (revCount 794 to 797). No npm dependency manifest changed across it, so
@@ -373,7 +378,7 @@
     # enabled live keep-both conflict resolve at the shipped entry point,
     # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=7c56dbdba4491a8200f2a1fff5d5f7784263d72c";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=f5e1b39a2f91db2f53edf3f4040795f29ff70e66";
       flake = false;
     };
 
