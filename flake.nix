@@ -290,6 +290,58 @@
     # of the operator's, and the auth commands read the key from the systemd
     # credential slot rather than a development key file beside the state.
     #
+    # This revision `32b2441f1d7c666d5aa6f5e730221aff2f369b78` is 13 commits
+    # after the previous pin `f5e1b39a2f91db2f53edf3f4040795f29ff70e66`
+    # (revCount 800 to 813) and is the merge of #338, which completes the return
+    # trip of the framing work: a `notes.get` whose Markdown does not fit one
+    # frame comes back as a declared response body when the caller offers to
+    # accept one (`accept: { bodyBytes }`), instead of being withheld as
+    # `oversize`. The client still sends the read as a single frame first and
+    # retries with `accept` only after an `oversize` answer, so a read that fits
+    # is byte-identical to before and a protocol-1 daemon sees no change.
+    #
+    # On this host that means a note whose stored content row (the stored `data`
+    # string, measured as UTF-8) is at or under `STORED_CONTENT_READ_BYTES`
+    # (262,144 bytes) can read back whole instead of being withheld once its
+    # projection passes the 65,536-byte response frame. That needs all of: a
+    # client that has probed protocol 2, the body slot free, Markdown within the
+    # smaller of the offer and `WIRE_BODY_BYTES`, and text a raw body can carry —
+    # no lone surrogate, no disallowed control character. A note that fails one of
+    # those size or text conditions keeps the single-frame bound and answers
+    # `oversize` as before; a held slot answers `busy`, described below.
+    #
+    # The stored-row threshold is still the binding limit: a row over it is
+    # refused before any projection runs and answers `unavailable`, and the wire
+    # bound is twice that row (`WIRE_BODY_BYTES`) as a budget choice rather than
+    # a proven ceiling, so a note can still answer `oversize` below both. Those
+    # content bounds are staging values — the intended ceiling is Notesnook's
+    # own, and the document-worker work tracked upstream as #337 replaces them.
+    #
+    # The accepted method set, the service-configuration schema and the daemon's
+    # read-policy allowlists are untouched by these 15 files, so no method becomes
+    # reachable that was not reachable before. What does change is the shape of an
+    # answer to a method already reachable: the daemon's frame parser now accepts
+    # a top-level `accept` key on `notes.get`, and an accepted read takes the
+    # daemon's single process-wide large-body slot — the same slot a received
+    # request body takes.
+    #
+    # That slot is the operational change to know about. A second large read or
+    # write while it is held is refused `busy`, so a large note that used to come
+    # back as a successful `oversize` result with its metadata can now come back
+    # `busy`; a body that fails its length, digest or UTF-8 check, or whose
+    # deadline expires, comes back `service_unavailable`; and a client that offers
+    # `accept` and then stops reading holds the slot until the 30-second send
+    # deadline, during which every other large read or write on the daemon is
+    # refused `busy`. Each accepted read also holds its converted Markdown, and
+    # the daemon converts a note twice when the MCP client retries after
+    # `oversize` — once for the plain read, once for the accepted one. That retry
+    # rule lives in the MCP client only: the daemon will send a body to any
+    # admitted peer that offers `accept`, large note or not.
+    #
+    # `package.json` and `package-lock.json` are unchanged between the two pins
+    # (`3e66ec318517ebe57647ba5690be0e33ccd89e81` and
+    # `7f64f260509d243173dc6414a54ddc19b3c1daa4`), so `npmDepsHash` is unchanged.
+    #
     # This revision `f5e1b39a2f91db2f53edf3f4040795f29ff70e66` is 3 commits
     # after the previous pin `7c56dbdba4491a8200f2a1fff5d5f7784263d72c`
     # (revCount 797 to 800). `package.json` and `package-lock.json` are
@@ -378,7 +430,7 @@
     # enabled live keep-both conflict resolve at the shipped entry point,
     # keeping that gate off by default.
     nookbridge = {
-      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=f5e1b39a2f91db2f53edf3f4040795f29ff70e66";
+      url = "git+https://git.montycasa.net/patrick/NookBridge?rev=32b2441f1d7c666d5aa6f5e730221aff2f369b78";
       flake = false;
     };
 
